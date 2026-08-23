@@ -1,0 +1,23 @@
+# systemd unit for a persistent loon instance on the home server.
+# Install: sudo cp deploy/loon.service /etc/systemd/system/loon.service
+#          sudo systemctl daemon-reload && sudo systemctl enable --now loon
+# Projects are saved into an ncdata path so they sync to Nextcloud.
+
+[Unit]
+Description=loon (AI electronics design tool)
+After=network.target
+
+[Service]
+Type=simple
+User=filip
+WorkingDirectory=/media/nas/filip/ncdata/filip/files/Projects/loon
+Environment="PATH=/home/filip/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="LOON_PORT=8790"
+Environment="LOON_FS_DIR=/media/nas/filip/ncdata/filip/files/Electronics/loon-projects"
+Environment="LOON_CLAUDE_BIN=/home/filip/.local/bin/claude"
+ExecStart=/usr/local/bin/bun run server/src/index.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+{
+  "name": "loon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["shared", "server", "web"],
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "dev:server": "cd server && bun run dev",
+    "dev:web": "cd web && bun run dev",
+    "build": "cd web && bun run build",
+    "start": "cd server && bun run start",
+    "typecheck": "tsc -b --pretty"
+  },
+  "dependencies": {
+    "@loon/shared": "workspace:*",
+    "@loon/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@trpc/client": "^11.0.0",
+    "typescript": "^5.6.3"
+  }
+}

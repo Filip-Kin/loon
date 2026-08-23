@@ -1,0 +1,14 @@
+{
+  "name": "@loon/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch run src/index.ts",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@loon/shared": "workspace:*",
+    "@trpc/server": "^11.0.0",
+    "zod": "^3.23.8"
+  }
+}

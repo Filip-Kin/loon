@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/projects/
+*.log
+.DS_Store
+.env
+.env.local
+scratch/
