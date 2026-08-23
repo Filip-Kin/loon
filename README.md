@@ -23,6 +23,9 @@ the AI assistant. PCB layout, simulation, and board fabrication come after.
 - Load and save projects as `.kicad_sch` files straight to the filesystem. On
   the home server the project folder lives inside the Nextcloud data tree, so
   files sync to Nextcloud with no extra step.
+- Mobile friendly. On a phone it becomes a single-panel layout with a bottom tab
+  bar (Design / Parts / Assistant): touch to pan, pinch to zoom, tap to select,
+  and talk to the AI or drive a probe. The full editor is still desktop.
 
 ## Run it
 

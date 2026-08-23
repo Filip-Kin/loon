@@ -36,11 +36,14 @@ export function Canvas(props: Props) {
   const panning = useRef<{ mx: number; my: number; vx: number; vy: number } | null>(null);
   const [wireStart, setWireStart] = useState<{ at: Point; pin?: PinRef } | null>(null);
 
-  function toWorld(e: React.MouseEvent): Point {
+  function toWorldXY(clientX: number, clientY: number): Point {
     const rect = svgRef.current!.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
     return { x: (sx - viewport.x) / viewport.scale, y: (sy - viewport.y) / viewport.scale };
+  }
+  function toWorld(e: React.MouseEvent): Point {
+    return toWorldXY(e.clientX, e.clientY);
   }
 
   function allPins(): PinHandle[] {
@@ -139,6 +142,53 @@ export function Canvas(props: Props) {
     panning.current = null;
   }
 
+  // #region touch (mobile): one finger pans / taps, two fingers pinch-zoom
+  const touch = useRef<{ mode: "pan" | "pinch" | null; sx: number; sy: number; vx: number; vy: number; moved: boolean; d0: number; s0: number; mx: number; my: number }>({ mode: null, sx: 0, sy: 0, vx: 0, vy: 0, moved: false, d0: 0, s0: 1, mx: 0, my: 0 });
+
+  function touchDist(t: React.TouchList) {
+    return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch.current = { ...touch.current, mode: "pan", sx: t.clientX, sy: t.clientY, vx: viewport.x, vy: viewport.y, moved: false };
+    } else if (e.touches.length === 2) {
+      const rect = svgRef.current!.getBoundingClientRect();
+      touch.current = {
+        ...touch.current, mode: "pinch", d0: touchDist(e.touches), s0: viewport.scale, vx: viewport.x, vy: viewport.y,
+        mx: (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left,
+        my: (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top,
+      };
+    }
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    const s = touch.current;
+    if (s.mode === "pan" && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - s.sx, dy = t.clientY - s.sy;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) s.moved = true;
+      setViewport({ ...viewport, x: s.vx + dx, y: s.vy + dy });
+    } else if (s.mode === "pinch" && e.touches.length === 2) {
+      const factor = touchDist(e.touches) / (s.d0 || 1);
+      const newScale = Math.min(40, Math.max(1.5, s.s0 * factor));
+      const worldX = (s.mx - s.vx) / s.s0;
+      const worldY = (s.my - s.vy) / s.s0;
+      setViewport({ scale: newScale, x: s.mx - worldX * newScale, y: s.my - worldY * newScale });
+    }
+  }
+
+  function onTouchEnd() {
+    const s = touch.current;
+    if (s.mode === "pan" && !s.moved) {
+      const w = toWorldXY(s.sx, s.sy);
+      if (tool === "place" && props.placingLibId) props.onPlace(snapPoint(w, PLACE_GRID));
+      else props.onSelect(hitSymbol(w));
+    }
+    s.mode = null;
+  }
+
   const cls = ["canvas", panning.current ? "panning" : tool === "place" ? "placing" : tool === "wire" ? "wiring" : ""].join(" ");
   const selInst = props.selection ? schem.symbols.find((s) => s.uuid === props.selection) : null;
 
@@ -151,6 +201,9 @@ export function Canvas(props: Props) {
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
     >
       <defs>
         <pattern id="grid" width={PLACE_GRID} height={PLACE_GRID} patternUnits="userSpaceOnUse">

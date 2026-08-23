@@ -27,6 +27,8 @@ export function App() {
   const [aiAvailable, setAiAvailable] = useState(true);
   const [rightTab, setRightTab] = useState<"props" | "ai" | "debug">("ai");
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  const [mobileView, setMobileView] = useState<"design" | "parts" | "panel">("design");
 
   const past = useRef<Schematic[]>([]);
   const future = useRef<Schematic[]>([]);
@@ -158,9 +160,18 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selection, schem, projectName, resolver]);
 
+  // Track viewport size for the mobile layout.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 820px)");
+    const onChange = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   function pickPart(libId: string) {
     setPlacingLibId(libId);
     setTool("place");
+    if (isMobile) setMobileView("design"); // jump to the sheet to drop the part
   }
 
   return (
@@ -173,17 +184,17 @@ export function App() {
         </select>
         <button onClick={() => { const n = prompt("New project name", "untitled"); if (n) newProject(n); }}>New</button>
         <button onClick={save}>Save</button>
-        <div style={{ width: 1, height: 22, background: "var(--line)" }} />
-        <button className={tool === "select" ? "primary" : ""} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>
-        <button className={tool === "wire" ? "primary" : ""} onClick={() => setTool("wire")}>Wire</button>
-        {placingLibId && <span className="status">Placing {placingLibId} - click sheet (Esc to stop)</span>}
+        <div className="desktop-only" style={{ width: 1, height: 22, background: "var(--line)" }} />
+        <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>
+        <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>
+        {placingLibId && <span className="status">Placing {placingLibId}{isMobile ? " - tap sheet" : " - click sheet (Esc to stop)"}</span>}
         <div className="spacer" />
-        <button onClick={undo}>Undo</button>
-        <button onClick={redo}>Redo</button>
-        <span className="status">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "loading..."}</span>
+        <button className="desktop-only" onClick={undo}>Undo</button>
+        <button className="desktop-only" onClick={redo}>Redo</button>
+        <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "loading..."}</span>
       </div>
 
-      <div className="workspace">
+      <div className={"workspace" + (isMobile ? " mobile" : "")} data-view={mobileView}>
         <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />
 
         <div className="canvas-wrap">
@@ -226,6 +237,14 @@ export function App() {
           )}
         </div>
       </div>
+
+      {isMobile && (
+        <div className="mobile-tabbar">
+          <button className={mobileView === "design" ? "on" : ""} onClick={() => setMobileView("design")}>Design</button>
+          <button className={mobileView === "parts" ? "on" : ""} onClick={() => setMobileView("parts")}>Parts</button>
+          <button className={mobileView === "panel" ? "on" : ""} onClick={() => { setMobileView("panel"); if (rightTab === "props") setRightTab("ai"); }}>Assistant</button>
+        </div>
+      )}
     </div>
   );
 }

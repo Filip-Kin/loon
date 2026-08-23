@@ -65,7 +65,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .panel .scroll { overflow-y: auto; flex: 1; min-height: 0; }
 
 .canvas-wrap { position: relative; background: var(--base); overflow: hidden; }
-svg.canvas { width: 100%; height: 100%; display: block; cursor: default; }
+svg.canvas { width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
 svg.canvas.placing { cursor: crosshair; }
 svg.canvas.wiring { cursor: crosshair; }
 svg.canvas.panning { cursor: grabbing; }
@@ -105,3 +105,36 @@ svg.canvas.panning { cursor: grabbing; }
 .tabs { display: flex; border-bottom: 1px solid var(--line); }
 .tabs button { border: none; border-radius: 0; background: transparent; color: var(--text-dim); flex: 1; padding: 10px; border-bottom: 2px solid transparent; }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+
+/* #region mobile */
+.mobile-tabbar { display: none; }
+
+@media (max-width: 820px) {
+  body { font-size: 15px; }
+  .topbar { gap: 8px; overflow-x: auto; }
+  .topbar .desktop-only { display: none; }
+  .topbar select { max-width: 44vw; }
+
+  .workspace.mobile { display: block; position: relative; }
+  .workspace.mobile > * { position: absolute; inset: 0 0 56px 0; width: auto; display: none; border: none; }
+  .workspace.mobile > .panel:not(.right) { border-right: none; }
+  .workspace.mobile[data-view="parts"] > .panel:not(.right) { display: flex; }
+  .workspace.mobile[data-view="design"] > .canvas-wrap { display: block; }
+  .workspace.mobile[data-view="panel"] > .panel.right { display: flex; }
+
+  .mobile-tabbar {
+    display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 56px;
+    background: var(--panel); border-top: 1px solid var(--line); z-index: 20;
+  }
+  .mobile-tabbar button {
+    flex: 1; border: none; border-radius: 0; background: transparent;
+    color: var(--text-dim); font-size: 12px; border-top: 2px solid transparent;
+  }
+  .mobile-tabbar button.on { color: var(--text); border-top-color: var(--accent); }
+
+  /* Bigger touch targets in the panels. */
+  .ai .composer textarea { height: 72px; }
+  button { padding: 8px 12px; }
+  .part-row { padding: 12px; }
+}
+
