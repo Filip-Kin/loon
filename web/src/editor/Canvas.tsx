@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import type { Schematic, LibSymbol, Point } from "@loon/shared/schematic";
 import type { PinRef } from "@loon/shared/ops";
 import { instanceBBox, snapPoint, PLACE_GRID, dist, type Placement } from "@loon/shared/geometry";
+import { deriveBlocks } from "@loon/shared/blocks";
 import { SymbolView, collectPins, type PinHandle } from "../lib/render";
 
 export type Tool = "select" | "place" | "wire";
@@ -158,6 +159,30 @@ export function Canvas(props: Props) {
       </defs>
       <g transform={`translate(${viewport.x},${viewport.y}) scale(${viewport.scale})`}>
         <rect x={-2000} y={-2000} width={6000} height={6000} fill="url(#grid)" />
+
+        {/* module blocks (derived from provenance): a labelled group box */}
+        {deriveBlocks(schem).map((b) => {
+          let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+          for (const uuid of b.memberUuids) {
+            const inst = schem.symbols.find((s) => s.uuid === uuid);
+            const def = inst && defs[inst.libId];
+            if (!inst || !def) continue;
+            const at = inst.uuid === dragUuid && dragPos ? dragPos : inst.at;
+            const bb = instanceBBox(def, { at, rotation: inst.rotation, mirror: inst.mirror });
+            minx = Math.min(minx, bb.min.x); miny = Math.min(miny, bb.min.y);
+            maxx = Math.max(maxx, bb.max.x); maxy = Math.max(maxy, bb.max.y);
+          }
+          if (!isFinite(minx)) return null;
+          const pad = 2.5;
+          const label = `${b.moduleId}${Object.keys(b.params).length ? " " + Object.entries(b.params).map(([k, v]) => `${k}=${v}`).join(" ") : ""}`;
+          return (
+            <g key={b.id}>
+              <rect x={minx - pad} y={miny - pad} width={maxx - minx + pad * 2} height={maxy - miny + pad * 2}
+                rx={1.5} fill="rgba(124,58,237,0.05)" stroke="rgba(124,58,237,0.5)" strokeWidth={0.25} strokeDasharray="1.5 1" vectorEffect="non-scaling-stroke" />
+              <text x={minx - pad + 0.5} y={miny - pad - 0.8} fontSize={1.6} fill="#9a6bff">{label}</text>
+            </g>
+          );
+        })}
 
         {/* wires */}
         {schem.wires.map((w) => (

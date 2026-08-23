@@ -6,5 +6,6 @@ export * from "./ops";
 export * from "./apply-ops";
 export * from "./modules";
 export * from "./probe";
+export * from "./blocks";
 export * from "./kicad-sch";
 export * from "./contract";
