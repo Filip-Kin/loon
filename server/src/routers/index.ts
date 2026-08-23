@@ -3,6 +3,7 @@ import { router, publicProcedure } from "../trpc";
 import { library } from "../services/library";
 import { storage } from "../services/storage";
 import { generateOps } from "../services/ai";
+import { probeHub } from "../services/probe-hub";
 import { parseSchematic, serializeSchematic } from "@loon/shared/kicad-sch";
 import { emptySchematic, type Schematic, type LibSymbol } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
@@ -84,10 +85,27 @@ const aiRouter = router({
     }),
 });
 
+const probeRouter = router({
+  list: publicProcedure.query(() => probeHub.list()),
+  execute: publicProcedure
+    .input(z.object({ probeId: z.string(), command: z.any() }))
+    .mutation(({ input }) => probeHub.execute(input.probeId, input.command)),
+  getAssignments: publicProcedure
+    .input(z.object({ probeId: z.string() }))
+    .query(({ input }) => probeHub.getAssignments(input.probeId)),
+  setAssignments: publicProcedure
+    .input(z.object({ probeId: z.string(), assignments: z.array(z.any()) }))
+    .mutation(({ input }) => {
+      probeHub.setAssignments(input.probeId, input.assignments as any);
+      return { ok: true };
+    }),
+});
+
 export const appRouter = router({
   library: librouter,
   project: projectRouter,
   ai: aiRouter,
+  probe: probeRouter,
   health: publicProcedure.query(() => ({ ok: true, ts: Date.now() })),
 });
 

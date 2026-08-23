@@ -73,6 +73,29 @@ from the fast text-to-ops path so ordinary edits stay quick.
 - OSH Park export: generate the Gerber and drill package to upload. This needs
   `kicad-cli` on the host for Gerber generation from the PCB.
 
+## Hardware-in-the-loop debugging (first version built)
+
+Debugging a board you actually built. A small network device (the "probe") is
+wired to points on the board; Claude tells you where to connect each channel,
+then reads and drives those pins to find the fault, reasoning against the
+schematic. Built so far:
+
+- Protocol in `shared/src/probe.ts`; a WebSocket hub in the server
+  (`services/probe-hub.ts`) that probes dial into (no port forwarding).
+- Agents: `probe/loon_probe.py` (Raspberry Pi / Linux, + `--mock`),
+  `probe/digilent.py` (Digilent Analog Discovery 2/3, the accurate/fast tier),
+  and `probe/esp32/main.py` (ESP32-S3 MicroPython). All speak one protocol.
+- `mcp/server.ts` exposes the probe to any Claude as MCP tools, so Claude can
+  read and send signals itself during a debug session. Each probe advertises its
+  limits (logic voltage, 5V tolerance, ADC presence, sample rate) so Claude does
+  not overreach.
+- A Debug tab in the UI lists live probes and reads/drives pins by hand.
+
+Next: a guided "connection plan" (Claude assigns probe channels to schematic
+nets/testpoints and the UI shows the wiring), streaming waveform capture on the
+Analog Discovery, and a loon "debug mode" that runs the bridge with the probe
+MCP attached automatically.
+
 ## Simulation
 
 Phased, MCU first.

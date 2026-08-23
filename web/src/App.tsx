@@ -4,6 +4,7 @@ import { Canvas, type Tool, type Viewport } from "./editor/Canvas";
 import { PartsPanel } from "./panels/PartsPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { AiPanel, type ChatMsg } from "./panels/AiPanel";
+import { DebugPanel } from "./panels/DebugPanel";
 import { makeClientResolver } from "./lib/resolver";
 import { applyOps } from "@loon/shared/apply-ops";
 import type { Schematic, LibSymbol, Point } from "@loon/shared/schematic";
@@ -24,7 +25,7 @@ export function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(true);
-  const [rightTab, setRightTab] = useState<"props" | "ai">("ai");
+  const [rightTab, setRightTab] = useState<"props" | "ai" | "debug">("ai");
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
 
   const past = useRef<Schematic[]>([]);
@@ -207,10 +208,13 @@ export function App() {
 
         <div className="panel right">
           <div className="tabs">
-            <button className={rightTab === "ai" ? "on" : ""} onClick={() => setRightTab("ai")}>AI Assistant</button>
+            <button className={rightTab === "ai" ? "on" : ""} onClick={() => setRightTab("ai")}>AI</button>
             <button className={rightTab === "props" ? "on" : ""} onClick={() => setRightTab("props")}>Properties</button>
+            <button className={rightTab === "debug" ? "on" : ""} onClick={() => setRightTab("debug")}>Debug</button>
           </div>
-          {rightTab === "ai" ? (
+          {rightTab === "debug" ? (
+            <DebugPanel />
+          ) : rightTab === "ai" ? (
             <AiPanel messages={messages} busy={busy} aiAvailable={aiAvailable} onSend={aiSend} />
           ) : (
             <PropertiesPanel

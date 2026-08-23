@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "workspaces": ["shared", "server", "web"],
+  "workspaces": [
+    "shared",
+    "server",
+    "web",
+    "mcp"
+  ],
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "dev:server": "cd server && bun run dev",

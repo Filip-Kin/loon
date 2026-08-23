@@ -1,6 +1,7 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./routers";
 import { LOON_CONTRACT_VERSION, type LoonManifest } from "@loon/shared/contract";
+import { probeHub, type ProbeSocketData } from "./services/probe-hub";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -35,13 +36,19 @@ const manifest: LoonManifest = {
 };
 aiAvailable().then((ok) => (manifest.aiAvailable = ok));
 
-const server = Bun.serve({
+const server = Bun.serve<ProbeSocketData, {}>({
   port: PORT,
   idleTimeout: 255,
-  async fetch(req) {
+  async fetch(req, server) {
     const url = new URL(req.url);
 
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+
+    // Probe agents connect here over WebSocket.
+    if (url.pathname === "/probe/ws") {
+      if (server.upgrade(req, { data: {} as ProbeSocketData })) return undefined as unknown as Response;
+      return new Response("expected websocket upgrade", { status: 426 });
+    }
 
     // Discovery manifest for the claude-terminal / router contract.
     if (url.pathname === "/.well-known/loon") {
@@ -72,6 +79,15 @@ const server = Bun.serve({
       "Loon server is up. Build the web UI (bun run build) or run the dev server (bun run dev).",
       { status: 200, headers: cors(new Headers({ "content-type": "text/plain" })) },
     );
+  },
+  websocket: {
+    open() {},
+    message(ws, message) {
+      probeHub.onMessage(ws, typeof message === "string" ? message : message.toString());
+    },
+    close(ws) {
+      probeHub.onClose(ws);
+    },
   },
 });
 
