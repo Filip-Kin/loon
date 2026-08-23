@@ -15,6 +15,7 @@ export type Op =
   | { op: "add_junction"; at: { x: number; y: number } }
   | { op: "add_label"; text: string; at: { x: number; y: number }; rotation?: number; kind?: "local" | "global" | "hier" }
   | { op: "add_no_connect"; at: { x: number; y: number } }
+  | { op: "add_text"; text: string; at: { x: number; y: number }; rotation?: number; size?: number }
   | { op: "set_title"; title?: string; rev?: string; company?: string }
   // Instantiate a parametric sub-circuit (a "module"): expands to primitive
   // ops. Modules are the building blocks the AI composes larger designs from.

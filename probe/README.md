@@ -59,6 +59,28 @@ mpremote connect /dev/ttyACM0 fs cp esp32/main.py :main.py
 mpremote connect /dev/ttyACM0 reset
 ```
 
+## Example: identifying an unknown motor connector pinout
+
+A common job (this is why the fonginator board exists): a stock motor connector
+carries GND, VCC, EN, DIR (CW/CCW), and PWM, but the pin order is unknown. The
+4-pin fan connector is the same set without DIR. Claude can identify the order
+with the probe. The Analog Discovery is ideal here because its inputs are safe
+above 3.3V; with a Pi/ESP32, measure through a divider and never let the probe
+see more than its logic voltage.
+
+1. Power the board from its battery. Do not drive anything yet.
+2. Read the DC voltage on each connector pin. The pin near battery/motor-supply
+   voltage is VCC; the pin at 0V that is common to board ground is GND.
+3. The remaining pins are logic inputs (EN, DIR, PWM), sitting near 0V or
+   floating. Drive one candidate at a time from a known 3.3V GPIO and watch the
+   motor:
+   - motor starts/stops -> EN
+   - motor reverses -> DIR (CW/CCW)
+   - a PWM duty sweep changes speed -> PWM
+4. Only ever drive the logic pins, never VCC or GND, and confirm the driver is
+   3.3V-logic compatible first.
+5. Record the mapping back onto the connector in the schematic.
+
 ## Letting Claude drive the probe (MCP)
 
 The `mcp/` server exposes the probe to any Claude as tools (`probe_list`,

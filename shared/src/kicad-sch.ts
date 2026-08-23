@@ -253,6 +253,11 @@ export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxLi
     push(list(sym(head), ...items));
   }
 
+  // text annotations
+  for (const t of schem.texts ?? []) {
+    push(list(sym("text"), str(t.text), node("at", num(t.at.x), num(t.at.y), num(t.rotation)), effects(t.size), node("uuid", str(t.uuid))));
+  }
+
   push(node("sheet_instances", node("path", str("/"), node("page", str("1")))));
 
   return serialize(root) + "\n";
@@ -324,6 +329,19 @@ export function parseSchematic(text: string): { schem: Schematic; libRaw: Record
     }
   }
 
+  const texts = findAll(root, "text").map((t) => {
+    const at = find(t, "at");
+    const eff = find(t, "effects");
+    const size = eff ? parseFloat(value(find(eff, "font") ?? eff, "size") ?? "1.27") : 1.27;
+    return {
+      uuid: value(t, "uuid") ?? crypto.randomUUID(),
+      text: t.items[1]?.kind === "atom" ? t.items[1].value : "",
+      at: { x: at ? numAt(at, 1) : 0, y: at ? numAt(at, 2) : 0 },
+      rotation: at ? numAt(at, 3) : 0,
+      size,
+    };
+  });
+
   const tb = find(root, "title_block");
   const schem: Schematic = {
     version: parseInt(value(root, "version") ?? "20231120", 10),
@@ -336,6 +354,7 @@ export function parseSchematic(text: string): { schem: Schematic; libRaw: Record
     junctions,
     noConnects,
     labels,
+    texts,
     title: tb ? value(tb, "title") : undefined,
     company: tb ? value(tb, "company") : undefined,
     rev: tb ? value(tb, "rev") : undefined,

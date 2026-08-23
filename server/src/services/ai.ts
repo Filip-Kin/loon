@@ -58,6 +58,7 @@ const OP_SPEC = `Each op is one JSON object. Coordinates are millimetres on a 2.
 - {"op":"connect_pins","a":{"ref":"R1","pin":"1"},"b":{"ref":"U1","pin":"3"}}  (preferred way to wire; uses pin numbers from the parts list)
 - {"op":"add_wire","from":{"x":..,"y":..},"to":{"x":..,"y":..}}
 - {"op":"add_label","text":"VCC","at":{"x":..,"y":..},"kind":"local"}
+- {"op":"add_text","text":"a note on the sheet","at":{"x":..,"y":..},"size":2}
 - {"op":"add_junction","at":{"x":..,"y":..}}
 - {"op":"add_no_connect","at":{"x":..,"y":..}}
 - {"op":"set_title","title":"..","rev":".."}

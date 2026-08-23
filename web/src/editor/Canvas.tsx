@@ -263,6 +263,11 @@ export function Canvas(props: Props) {
           </g>
         ))}
 
+        {/* text annotations */}
+        {(schem.texts ?? []).map((t) => (
+          <text key={t.uuid} x={t.at.x} y={t.at.y} fontSize={t.size} fill="#c9c9c9" style={{ whiteSpace: "pre" }} transform={t.rotation ? `rotate(${-t.rotation} ${t.at.x} ${t.at.y})` : undefined}>{t.text}</text>
+        ))}
+
         {/* symbols */}
         {schem.symbols.map((inst) => {
           const def = defs[inst.libId];

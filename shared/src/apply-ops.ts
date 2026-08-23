@@ -87,13 +87,15 @@ export function applyOp(schem: Schematic, op: Op, resolve: LibResolver): OpResul
     }
 
     case "delete": {
+      if (!schem.texts) schem.texts = [];
       const has = (arr: { uuid: string }[]) => arr.some((x) => x.uuid === op.uuid);
-      const had = has(schem.symbols) || has(schem.wires) || has(schem.labels) || has(schem.junctions) || has(schem.noConnects);
+      const had = has(schem.symbols) || has(schem.wires) || has(schem.labels) || has(schem.junctions) || has(schem.noConnects) || has(schem.texts);
       schem.symbols = schem.symbols.filter((x) => x.uuid !== op.uuid);
       schem.wires = schem.wires.filter((x) => x.uuid !== op.uuid);
       schem.labels = schem.labels.filter((x) => x.uuid !== op.uuid);
       schem.junctions = schem.junctions.filter((x) => x.uuid !== op.uuid);
       schem.noConnects = schem.noConnects.filter((x) => x.uuid !== op.uuid);
+      schem.texts = schem.texts.filter((x) => x.uuid !== op.uuid);
       return had ? { ok: true } : { ok: false, error: `Nothing with uuid ${op.uuid}` };
     }
 
@@ -137,6 +139,13 @@ export function applyOp(schem: Schematic, op: Op, resolve: LibResolver): OpResul
     case "add_no_connect": {
       const uuid = newUuid();
       schem.noConnects.push({ uuid, at: snapPoint(op.at) });
+      return { ok: true, createdUuid: uuid };
+    }
+
+    case "add_text": {
+      const uuid = newUuid();
+      if (!schem.texts) schem.texts = [];
+      schem.texts.push({ uuid, text: op.text, at: op.at, rotation: op.rotation ?? 0, size: op.size ?? 1.6 });
       return { ok: true, createdUuid: uuid };
     }
 

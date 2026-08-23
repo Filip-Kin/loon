@@ -91,6 +91,15 @@ export interface Label {
   rotation: number;
 }
 
+// A free-text annotation on the sheet (KiCad schematic-level `(text ...)`).
+export interface TextNote {
+  uuid: string;
+  text: string;
+  at: Point;
+  rotation: number;
+  size: number;
+}
+
 export interface Schematic {
   version: number;
   generator: string;
@@ -103,6 +112,7 @@ export interface Schematic {
   junctions: Junction[];
   noConnects: NoConnect[];
   labels: Label[];
+  texts: TextNote[];
   // Free-form title-block metadata.
   title?: string;
   company?: string;
@@ -121,5 +131,6 @@ export function emptySchematic(uuid: string): Schematic {
     junctions: [],
     noConnects: [],
     labels: [],
+    texts: [],
   };
 }
