@@ -550,6 +550,175 @@ const modules: ModuleDef[] = [
 
   // #region RF heartbeat radio
   {
+    id: "buck_lm5116",
+    name: "Wide-input synchronous buck (LM5116 + FETs)",
+    description:
+      "A 10A rail from a battery bus. The LM5116 is a controller: the switching is done by two external N-FETs, so the heat spreads over three packages and copper instead of one SOIC, and the 100V part rides out the transients a motor bus produces. Values follow the equations in TI's datasheet (SNVS499I) for the current asked for here - re-run them through WEBENCH before ordering if the load is different.",
+    params: [
+      { name: "vout", type: "number", default: 5, doc: "Output voltage" },
+      { name: "iout", type: "number", default: 10, doc: "Output current, amps" },
+      { name: "vin", type: "number", default: 24, doc: "Nominal input voltage" },
+      { name: "vin_net", type: "string", default: "+24V", doc: "Input rail" },
+      { name: "vout_net", type: "string", default: "+5V", doc: "Output rail" },
+    ],
+    build(params) {
+      const vout = Number(p(params, "vout", 5));
+      const iout = Number(p(params, "iout", 10));
+      const vin = String(p(params, "vin_net", "+24V"));
+      const out = String(p(params, "vout_net", "+5V"));
+
+      // Feedback divider: VOUT = 1.215V x (1 + RHS / RLS).
+      const rls = 1.21; // kohm
+      const rhs = nearestE96(rls * (vout / 1.215 - 1));
+
+      // Current limit senses the inductor valley: RS = 0.11V / (IOUT x 1.4),
+      // the same margin TI uses in the datasheet example.
+      const rsense = Math.max(0.004, Math.round((0.11 / (iout * 1.4)) * 1000) / 1000);
+
+      // Inductor for roughly 30% ripple at 200kHz off a 24V bus.
+      const lval = Math.max(2.2, Math.round(((vout * (1 - vout / 24)) / (0.3 * iout * 200e3)) * 1e7) / 10);
+
+      // Emulated ramp. Above 7.5V out the datasheet's optimal slope method
+      // applies: the ramp current is IOS = (VOUT / 3) x 10uA/V, and the part
+      // needs a resistor from RAMP to VCC to supply the difference. Leave it
+      // out and the slope compensation is wrong, which shows up as a current
+      // limit that drifts with line voltage.
+      const gm = 5e-6;
+      const ampGain = 10;
+      const period = 1 / 200e3;
+      const vinNom = Number(p(params, "vin", 24));
+      const ios = (vout / 3) * 10e-6;
+      const crampF = vout > 7.5 ? (ios * lval * 1e-6) / (vout * ampGain * rsense) : (gm * lval * 1e-6) / (ampGain * rsense);
+      const cramp = Math.round(crampF * 1e12);
+      const vramp = (vout / vinNom) * (((vinNom - vout) * gm + ios) * period) / crampF;
+      const rramp = vout > 7.5 ? nearestE96((7.4 - vramp) / (ios - 25e-6)) : undefined;
+
+      return {
+        parts: [
+          { local: "U", libId: "Regulator_Switching:LM5116", value: "LM5116", dx: 0, dy: 0 },
+          { local: "QH", libId: "Transistor_FET:Power_NMOS_60V", value: "60V 10A high side", dx: 40, dy: -20 },
+          { local: "QL", libId: "Transistor_FET:Power_NMOS_60V", value: "60V 10A low side", dx: 40, dy: 10 },
+          { local: "L", libId: "Device:L", value: `${lval}u ${Math.ceil(iout * 1.4)}A`, dx: 70, dy: -10, footprint: "Inductor_SMD:L_12x12mm_H6mm" },
+          { local: "RS", libId: "Device:R", value: `${rsense} 1%`, dx: 70, dy: 20, footprint: "Resistor_SMD:R_2010_5025Metric" },
+          // Input bulk. A buck's input capacitor carries the ripple current, so
+          // there are four of them and they sit on the FET.
+          { local: "CIN1", libId: "Device:C", value: "2.2u/100V", dx: 20, dy: -40, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CIN2", libId: "Device:C", value: "2.2u/100V", dx: 28, dy: -40, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CIN3", libId: "Device:C", value: "2.2u/100V", dx: 36, dy: -40, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CIN4", libId: "Device:C", value: "2.2u/100V", dx: 44, dy: -40, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO1", libId: "Device:C", value: "47u", dx: 90, dy: 10, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO2", libId: "Device:C", value: "47u", dx: 98, dy: 10, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO3", libId: "Device:C", value: "47u", dx: 106, dy: 10, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO4", libId: "Device:C", value: "47u", dx: 114, dy: 10, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          // Housekeeping.
+          { local: "CVCC", libId: "Device:C", value: "1u", dx: -20, dy: 30, footprint: "Capacitor_SMD:C_0805_2012Metric" },
+          { local: "CHB", libId: "Device:C", value: "100n", dx: 30, dy: -30 },
+          { local: "DHB", libId: "Device:D", value: "200V switching", dx: 20, dy: -30, footprint: "Diode_SMD:D_SOD-123" },
+          { local: "CSS", libId: "Device:C", value: "10n", dx: -30, dy: 20 },
+          { local: "CRAMP", libId: "Device:C", value: `${cramp}p`, dx: -30, dy: 10 },
+          ...(rramp ? [{ local: "RRAMP", libId: "Device:R", value: `${rramp} 1%`, dx: -38, dy: 10 }] : []),
+          { local: "RT", libId: "Device:R", value: "16k 1%", dx: -30, dy: 0, doc: "200kHz" },
+          { local: "RUV1", libId: "Device:R", value: "102k 1%", dx: -40, dy: -20 },
+          { local: "RUV2", libId: "Device:R", value: "21k 1%", dx: -40, dy: -10 },
+          { local: "RHS", libId: "Device:R", value: `${rhs}k 1%`, dx: -20, dy: 40 },
+          { local: "RLS", libId: "Device:R", value: "1.21k 1%", dx: -20, dy: 50 },
+          { local: "RCOMP", libId: "Device:R", value: "12.4k", dx: -40, dy: 40 },
+          { local: "CCOMP", libId: "Device:C", value: "3300p", dx: -48, dy: 40 },
+          { local: "CHF", libId: "Device:C", value: "100p", dx: -48, dy: 50 },
+        ],
+        wires: [],
+        nets: [
+          { local: "U", pin: "1", label: vin },
+          { local: "U", pin: "6", label: "GND" },
+          { local: "U", pin: "14", label: "GND" },
+          { local: "U", pin: "21", label: "GND" },
+          // Forced PWM, and no external VCC supply.
+          { local: "U", pin: "11", label: "GND" },
+          { local: "U", pin: "17", label: "GND" },
+          // Start when the bus is up, on the divider's threshold.
+          { local: "U", pin: "2", label: "UVLO", scope: "local" },
+          { local: "RUV1", pin: "1", label: vin },
+          { local: "RUV1", pin: "2", label: "UVLO", scope: "local" },
+          { local: "RUV2", pin: "1", label: "UVLO", scope: "local" },
+          { local: "RUV2", pin: "2", label: "GND" },
+          { local: "U", pin: "3", label: "RT", scope: "local" },
+          { local: "RT", pin: "1", label: "RT", scope: "local" },
+          { local: "RT", pin: "2", label: "GND" },
+          { local: "U", pin: "4", label: "VCC", scope: "local" },
+          { local: "U", pin: "16", label: "VCC", scope: "local" },
+          { local: "CVCC", pin: "1", label: "VCC", scope: "local" },
+          { local: "CVCC", pin: "2", label: "GND" },
+          { local: "U", pin: "5", label: "RAMP", scope: "local" },
+          { local: "CRAMP", pin: "1", label: "RAMP", scope: "local" },
+          { local: "CRAMP", pin: "2", label: "GND" },
+          ...(rramp
+            ? [
+                { local: "RRAMP", pin: "1", label: "VCC", scope: "local" as const },
+                { local: "RRAMP", pin: "2", label: "RAMP", scope: "local" as const },
+              ]
+            : []),
+          { local: "U", pin: "7", label: "SS", scope: "local" },
+          { local: "CSS", pin: "1", label: "SS", scope: "local" },
+          { local: "CSS", pin: "2", label: "GND" },
+          // Feedback and compensation.
+          { local: "U", pin: "8", label: "FB", scope: "local" },
+          { local: "RHS", pin: "1", label: out },
+          { local: "RHS", pin: "2", label: "FB", scope: "local" },
+          { local: "RLS", pin: "1", label: "FB", scope: "local" },
+          { local: "RLS", pin: "2", label: "GND" },
+          { local: "U", pin: "9", label: "COMP", scope: "local" },
+          { local: "RCOMP", pin: "1", label: "COMP", scope: "local" },
+          { local: "RCOMP", pin: "2", label: "COMPC", scope: "local" },
+          { local: "CCOMP", pin: "1", label: "COMPC", scope: "local" },
+          { local: "CCOMP", pin: "2", label: "FB", scope: "local" },
+          { local: "CHF", pin: "1", label: "COMP", scope: "local" },
+          { local: "CHF", pin: "2", label: "FB", scope: "local" },
+          { local: "U", pin: "10", label: out },
+          // The power stage. CS and CSG straddle the sense resistor in the
+          // return leg of the low-side FET.
+          { local: "U", pin: "19", label: "HO", scope: "local" },
+          { local: "U", pin: "18", label: "HB", scope: "local" },
+          { local: "U", pin: "20", label: "SW", scope: "local" },
+          { local: "U", pin: "15", label: "LO", scope: "local" },
+          { local: "U", pin: "12", label: "CS_SENSE", scope: "local" },
+          { local: "U", pin: "13", label: "GND" },
+          { local: "CHB", pin: "1", label: "HB", scope: "local" },
+          { local: "CHB", pin: "2", label: "SW", scope: "local" },
+          { local: "DHB", pin: "1", label: "VCC", scope: "local" },
+          { local: "DHB", pin: "2", label: "HB", scope: "local" },
+          { local: "QH", pin: "1", label: "HO", scope: "local" },
+          { local: "QH", pin: "3", label: vin },
+          { local: "QH", pin: "2", label: "SW", scope: "local" },
+          { local: "QL", pin: "1", label: "LO", scope: "local" },
+          { local: "QL", pin: "3", label: "SW", scope: "local" },
+          { local: "QL", pin: "2", label: "CS_SENSE", scope: "local" },
+          { local: "RS", pin: "1", label: "CS_SENSE", scope: "local" },
+          { local: "RS", pin: "2", label: "GND" },
+          // The sense amplifier straddles the resistor: CS on the FET side,
+          // CSG on the ground side.
+          { local: "L", pin: "1", label: "SW", scope: "local" },
+          { local: "L", pin: "2", label: out },
+          { local: "CIN1", pin: "1", label: vin },
+          { local: "CIN1", pin: "2", label: "GND" },
+          { local: "CIN2", pin: "1", label: vin },
+          { local: "CIN2", pin: "2", label: "GND" },
+          { local: "CIN3", pin: "1", label: vin },
+          { local: "CIN3", pin: "2", label: "GND" },
+          { local: "CIN4", pin: "1", label: vin },
+          { local: "CIN4", pin: "2", label: "GND" },
+          { local: "CO1", pin: "1", label: out },
+          { local: "CO1", pin: "2", label: "GND" },
+          { local: "CO2", pin: "1", label: out },
+          { local: "CO2", pin: "2", label: "GND" },
+          { local: "CO3", pin: "1", label: out },
+          { local: "CO3", pin: "2", label: "GND" },
+          { local: "CO4", pin: "1", label: out },
+          { local: "CO4", pin: "2", label: "GND" },
+        ],
+      };
+    },
+  },
+  {
     id: "ethernet_w5500",
     name: "Ethernet port (W5500 + MagJack)",
     description:

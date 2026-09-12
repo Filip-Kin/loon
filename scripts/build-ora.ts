@@ -56,8 +56,10 @@ export function buildOra(): Schematic {
   label("J2", "1", "GND");
 
   // #region rails
-  ops.push({ op: "instantiate_module", moduleId: "buck_24v", params: { vout: 5, vin_net: "+24V", vout_net: "+5V" }, at: { x: 60, y: 90 } });
-  ops.push({ op: "instantiate_module", moduleId: "buck_24v", params: { vout: 12, vin_net: "+24V", vout_net: "+12V" }, at: { x: 60, y: 210 } });
+  // 10A rails, so these are controllers with external FETs rather than a chip
+  // with one integrated switch: a TPS54360 tops out at 3.5A.
+  ops.push({ op: "instantiate_module", moduleId: "buck_lm5116", params: { vout: 5, iout: 10, vin_net: "+24V", vout_net: "+5V" }, at: { x: 60, y: 90 } });
+  ops.push({ op: "instantiate_module", moduleId: "buck_lm5116", params: { vout: 12, iout: 10, vin_net: "+24V", vout_net: "+12V" }, at: { x: 60, y: 260 } });
   ops.push({ op: "instantiate_module", moduleId: "buckboost_20v", params: { vout: 20, iout: 4.5, vin_net: "+24V", vout_net: "+20V" }, at: { x: 60, y: 360 } });
   ops.push({ op: "instantiate_module", moduleId: "ldo_3v3", params: { vin_net: "+5V" }, at: { x: 60, y: 520 } });
 
@@ -134,7 +136,7 @@ export function buildOra(): Schematic {
       960,
     ],
     [`CHANNELS: CH1-CH${SWITCHED} are switched by the latch through TPS27S100B high-side switches. CH${SWITCHED + 1}-CH${SWITCHED + ALWAYS_ON} are always-on for the radio and the controller. Every channel runs through a self-resetting ATO breaker into a 12AWG screw terminal.`, 1000],
-    ["RAILS: 5V and 12V from TPS54360 bucks (60V parts: a 24V pack under regen overshoots). 20V from an LM5175 buck-boost, because the pack sags below 20V under load - size its power stage for the real computer load. 3V3 from an LDO off 5V.", 1030],
+    ["RAILS: 5V and 12V at 10A from LM5116 controllers with external 60V FETs - an integrated-switch buck stops around 6A at this input voltage, and the bus spikes past 36V under regen. 20V from an LM5175 buck-boost, because the pack sags below 20V under load. 3V3 from an LDO off 5V.", 1030],
     ["20V rail values follow the LM5175 datasheet's 4.5A example, but its breaker is 10A. Size the power stage - FETs, inductor, sense resistor - for the current that breaker will let through before ordering, or the converter dies before the fuse opens.", 1060],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });

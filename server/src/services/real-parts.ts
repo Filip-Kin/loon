@@ -133,6 +133,46 @@ export const REAL_PARTS: RealPart[] = [
     },
   },
   {
+    mpn: "LM5116MHX/NOPB",
+    priceUsd: 4.4,
+    symbol: {
+      libId: "Regulator_Switching:LM5116",
+      refPrefix: "U",
+      value: "LM5116",
+      description:
+        "100V synchronous buck controller with external FETs, HTSSOP-20 with a thermal pad. A controller rather than an integrated switch, because at 24V in an integrated-FET buck stops around 6A and this bus spikes well past 36V under regen. Pinout from the TI datasheet SNVS499I.",
+      keywords: "buck controller synchronous 100v wide vin emulated current mode",
+      datasheet: "https://www.ti.com/lit/ds/symlink/lm5116.pdf",
+      // KiCad's EP3.4x6.5 variant of this land pattern declares a 0.2mm
+      // footprint clearance and then places its own pads 0.19mm apart, so it
+      // fails DRC on its own geometry. This one does not.
+      footprint: "Package_SO:HTSSOP-20-1EP_4.4x6.5mm_P0.65mm_EP2.85x4mm",
+      pins: [
+        { number: "1", name: "VIN", type: "power_in", side: "left" },
+        { number: "2", name: "UVLO", type: "input", side: "left" },
+        { number: "3", name: "RT/SYNC", type: "input", side: "left" },
+        { number: "4", name: "EN", type: "input", side: "left" },
+        { number: "5", name: "RAMP", type: "input", side: "left" },
+        { number: "6", name: "AGND", type: "power_in", side: "left" },
+        { number: "7", name: "SS", type: "input", side: "left" },
+        { number: "8", name: "FB", type: "input", side: "left" },
+        { number: "9", name: "COMP", type: "output", side: "left" },
+        { number: "10", name: "VOUT", type: "input", side: "left" },
+        { number: "11", name: "DEMB", type: "input", side: "right" },
+        { number: "12", name: "CS", type: "input", side: "right" },
+        { number: "13", name: "CSG", type: "input", side: "right" },
+        { number: "14", name: "PGND", type: "power_in", side: "right" },
+        { number: "15", name: "LO", type: "output", side: "right" },
+        { number: "16", name: "VCC", type: "power_out", side: "right" },
+        { number: "17", name: "VCCX", type: "input", side: "right" },
+        { number: "18", name: "HB", type: "power_in", side: "right" },
+        { number: "19", name: "HO", type: "output", side: "right" },
+        { number: "20", name: "SW", type: "passive", side: "right" },
+        { number: "21", name: "EP", type: "power_in", side: "right" },
+      ],
+    },
+  },
+  {
     mpn: "W5500",
     priceUsd: 4.6,
     symbol: {

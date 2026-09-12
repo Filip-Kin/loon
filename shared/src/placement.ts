@@ -531,7 +531,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   // both of them wrap, and a board that wraps twice is a tall empty board.
   const stacked = powerW > 0 && digitalW > 0 && (colZoneW > 0 || (!allColumns.length && powerW + digitalW > 80));
   const looseW = (stacked ? Math.max(powerW, digitalW) : powerW + (powerW && digitalW ? ZONE_GAP : 0) + digitalW) + (otherW ? ZONE_GAP + otherW / 2 : 0);
-  const midTarget = bankW ? Math.max(bankW - colZoneW, 80) : Math.max(looseW * 0.8, 40);
+  const midTarget = bankW ? Math.max(bankW - colZoneW - lugZoneW, 80) : Math.max(looseW * 0.8, 40);
 
   const powerRows = rowsOf(powerZone, stacked ? midTarget : Math.max(midTarget * 0.55, 35));
   const digitalRows = rowsOf(digitalZone, stacked ? midTarget : Math.max(midTarget * 0.45, 35));
@@ -545,7 +545,11 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const connW = leftConns.length ? Math.max(...leftConns.map((c) => c.w)) : 0;
   const leftZoneW = Math.max(lugZoneW, connW ? connW + ZONE_GAP : 0);
   const contentW = Math.max(bankW, railBankW + lugZoneW, leftZoneW + midUsed + colZoneW, leftZoneW + colZoneW + 40, 40);
-  const otherRows = rowsOf(otherZone, Math.max(contentW - colZoneW, 40));
+  // Whatever is left over gets the band between the two columns - not the
+  // whole width. Handing it the column's space is how a cluster ends up on top
+  // of the radio and the overlap guard throws it off the board.
+  const midBand = Math.max(contentW - leftZoneW - colZoneW, 40);
+  const otherRows = rowsOf(otherZone, midBand);
   const otherSize = sizeRows(otherRows);
 
   const topDepth = columns.length ? Math.max(...columns.map((c) => c.h)) : 0;
@@ -606,7 +610,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const digitalLeft = stacked || !powerWidth ? powerLeft : powerLeft + powerWidth + ZONE_GAP;
   const powerBottom = dropRows(powerRows, powerLeft, midTop, powerWidth);
   const digitalBottom = dropRows(digitalRows, digitalLeft, stacked ? powerBottom + ZONE_GAP : midTop, digitalSize.w);
-  dropRows(otherRows, EDGE + leftZoneW, Math.max(powerBottom, digitalBottom) + ZONE_GAP / 2, contentW - leftZoneW);
+  dropRows(otherRows, EDGE + leftZoneW, Math.max(powerBottom, digitalBottom) + ZONE_GAP / 2, midBand);
 
   // The right column, aligned on one edge so the antenna is on the board edge
   // itself rather than behind a row of capacitors.
