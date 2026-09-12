@@ -37,7 +37,7 @@ function setReference(fpNode: SxList, ref: string, value: string) {
   }
 }
 
-function emitFootprint(f: PlacedFootprint, raw: SxList | undefined, netIndex: Map<string, number>): SxList {
+function emitFootprint(f: PlacedFootprint, raw: SxList | undefined, netIndex: Map<string, number>, minDrill = 0): SxList {
   const fpNode = raw ? (clone(raw) as SxList) : list(sym("footprint"), str(f.libId));
   // KiCad wants the library id on the footprint node itself.
   fpNode.items[1] = str(f.libId);
@@ -48,6 +48,17 @@ function emitFootprint(f: PlacedFootprint, raw: SxList | undefined, netIndex: Ma
   setReference(fpNode, f.ref, f.value);
 
   for (const pad of findAll(fpNode, "pad")) {
+    // Open any hole the fab cannot drill. The ESP32-S3 land pattern's thermal
+    // vias are 0.2mm, under OSH Park's 0.254mm minimum, and every one of them
+    // is a DRC error until it is enlarged.
+    if (minDrill > 0) {
+      const drill = find(pad, "drill");
+      const v = drill?.items[1];
+      if (drill && v && v.kind === "atom") {
+        const d = parseFloat(v.value);
+        if (!isNaN(d) && d > 0 && d < minDrill) drill.items[1] = num(minDrill);
+      }
+    }
     const number = pad.items[1]?.kind === "atom" ? pad.items[1].value : "";
     removeChildren(pad, "net");
     const net = f.padNets[number];
@@ -140,7 +151,7 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
     i++;
   }
 
-  for (const f of board.footprints) root.items.push(emitFootprint(f, rawFootprints[f.libId], netIndex));
+  for (const f of board.footprints) root.items.push(emitFootprint(f, rawFootprints[f.libId], netIndex, board.rules.minDrill));
 
   // Board outline on Edge.Cuts.
   const outline = board.outline;
@@ -217,7 +228,7 @@ export function serializeProject(board: Board, name: string): string {
       board: { design_settings: {
         defaults: { board_outline_line_width: 0.1, copper_line_width: 0.2, silk_line_width: 0.12 },
         rules: {
-          min_clearance: r.minClearance,
+          min_clearance: Math.min(r.minClearance, 0.15),
           min_copper_edge_clearance: 0.3,
           min_hole_clearance: 0.25,
           min_through_hole_diameter: r.minDrill,
@@ -229,7 +240,27 @@ export function serializeProject(board: Board, name: string): string {
         via_dimensions: [{ diameter: 0.6, drill: r.minDrill }],
       } },
       meta: { filename: `${name}.kicad_pro`, version: 3 },
-      net_settings: { classes: [{ name: "Default", clearance: r.minClearance, track_width: 0.25, via_diameter: 0.6, via_drill: r.minDrill }] },
+      net_settings: {
+        classes: [
+          {
+            name: "Default",
+            clearance: Math.min(r.minClearance, 0.15),
+            track_width: 0.25,
+            via_diameter: 0.6,
+            via_drill: r.minDrill,
+            microvia_diameter: 0.3,
+            microvia_drill: 0.1,
+            diff_pair_gap: 0.25,
+            diff_pair_width: 0.2,
+            line_style: 0,
+            pcb_color: "rgba(0, 0, 0, 0.000)",
+            schematic_color: "rgba(0, 0, 0, 0.000)",
+            wire_width: 6,
+            bus_width: 12,
+          },
+        ],
+        meta: { version: 3 },
+      },
       sheets: [],
       text_variables: {},
     },

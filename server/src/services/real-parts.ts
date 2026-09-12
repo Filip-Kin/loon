@@ -232,7 +232,7 @@ export const REAL_PARTS: RealPart[] = [
       value: "60V N-MOSFET",
       description: "60V logic-level N-channel power MOSFET for a buck-boost or a low-side driver. 60V rating covers a 24V bus with regen spikes.",
       keywords: "mosfet n-channel power 60v",
-      footprint: "Package_TO_SOT_SMD:SON-8-1EP_5x6mm_P1.27mm_EP3.4x5.2mm",
+      footprint: "Package_SO:SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm",
       pins: [
         { number: "1", name: "G", type: "input", side: "left" },
         { number: "2", name: "S", type: "passive", side: "left" },
@@ -261,6 +261,24 @@ export const REAL_PARTS: RealPart[] = [
         { number: "5", name: "Q", type: "output", side: "right" },
         { number: "3", name: "QN", type: "output", side: "right" },
         { number: "8", name: "VCC", type: "power_in", side: "right" },
+      ],
+    },
+  },
+  {
+    mpn: "Keystone 3557",
+    priceUsd: 1.6,
+    assemblable: false,
+    symbol: {
+      libId: "Device:Fuse",
+      refPrefix: "F",
+      value: "ATO",
+      description:
+        "ATO/ATC blade fuse holder, PCB mount. Takes a self-resetting breaker as well as a fuse, which is what a robot wants: it comes back by itself after a stall.",
+      keywords: "fuse holder ato atc blade breaker self-resetting",
+      footprint: "Fuse:Fuseholder_Blade_ATO_Littelfuse_Pudenz_2_Pin",
+      pins: [
+        { number: "1", name: "IN", type: "passive", side: "left" },
+        { number: "2", name: "OUT", type: "passive", side: "right" },
       ],
     },
   },
@@ -349,7 +367,7 @@ export const REAL_PARTS: RealPart[] = [
         "40V single-channel smart high-side switch, 14-pin HTSSOP. Switches a 24V channel from a 3.3V logic pin, limits its own current, and reports load current on IMON - one analog pin per channel, no shunt in the load path.",
       keywords: "high side switch load driver current sense efuse imon",
       datasheet: "https://www.ti.com/lit/ds/symlink/tps27s100.pdf",
-      footprint: "Package_SO:HTSSOP-14-1EP_4.4x5mm_P0.65mm_EP3x5mm",
+      footprint: "Package_SO:Texas_HTSSOP-14-1EP_4.4x5mm_P0.65mm_EP3.4x5mm_Mask3.155x3.255mm",
       pins: [
         { number: "1", name: "NC1", type: "no_connect", side: "left" },
         { number: "2", name: "GND", type: "power_in", side: "left" },

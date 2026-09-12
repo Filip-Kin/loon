@@ -34,6 +34,9 @@ export interface Footprint {
   pads: FpPad[];
   graphics: FpGraphic[];
   bbox: { min: Point; max: Point };
+  // The courtyard is the keep-clear area KiCad's DRC checks between parts. It
+  // is bigger than the pads, so placement has to use it.
+  courtyard?: { min: Point; max: Point };
   // True when the land pattern came from KiCad's library rather than being
   // generated from a package name. Generated ones must be checked before fab.
   fromLibrary: boolean;
@@ -115,12 +118,25 @@ export function parseFootprint(text: string, libId: string): Footprint {
   }
   if (!isFinite(minx)) { minx = -1; miny = -1; maxx = 1; maxy = 1; }
 
+  let cminx = Infinity, cminy = Infinity, cmaxx = -Infinity, cmaxy = -Infinity;
+  const cacc = (p: Point) => {
+    cminx = Math.min(cminx, p.x); cminy = Math.min(cminy, p.y);
+    cmaxx = Math.max(cmaxx, p.x); cmaxy = Math.max(cmaxy, p.y);
+  };
+  for (const g of graphics) {
+    if (!g.layer.endsWith("CrtYd")) continue;
+    if (g.type === "line" || g.type === "rect") { cacc(g.a); cacc(g.b); }
+    else if (g.type === "circle") { cacc(g.center); cacc(g.end); }
+    else { cacc(g.start); cacc(g.mid); cacc(g.end); }
+  }
+
   return {
     libId,
     name,
     pads,
     graphics,
     bbox: { min: { x: minx, y: miny }, max: { x: maxx, y: maxy } },
+    courtyard: isFinite(cminx) ? { min: { x: cminx, y: cminy }, max: { x: cmaxx, y: cmaxy } } : undefined,
     fromLibrary: true,
     raw: root,
   };

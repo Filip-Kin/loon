@@ -26,8 +26,11 @@ export type Role =
   | "passive"
   | "other";
 
-const EDGE = 6; // mm from the board edge to a part's centre line
+const EDGE = 9; // mm from the board edge to a part's centre line
 const GAP = 3; // mm between neighbours
+// KiCad checks courtyards, which stand off from the pads. Placing to the pad
+// bounding box alone produces a board full of courtyard overlaps.
+const COURTYARD = 1.2; // mm of extra room around every part
 
 export function roleOf(f: PlacedFootprint, fp?: Footprint): Role {
   const v = `${f.value} ${f.libId}`.toLowerCase();
@@ -46,12 +49,17 @@ export function roleOf(f: PlacedFootprint, fp?: Footprint): Role {
   return "other";
 }
 
-function sizeOf(fp?: Footprint): { w: number; h: number } {
+function sizeOf(fp?: Footprint, rotation = 0): { w: number; h: number } {
   if (!fp) return { w: 5, h: 5 };
-  return {
-    w: Math.max(2, fp.bbox.max.x - fp.bbox.min.x),
-    h: Math.max(2, fp.bbox.max.y - fp.bbox.min.y),
-  };
+  // The courtyard is what DRC checks; fall back to the pads when a footprint
+  // does not declare one.
+  const box = fp.courtyard ?? fp.bbox;
+  const w = Math.max(2, box.max.x - box.min.x);
+  const h = Math.max(2, box.max.y - box.min.y);
+  // A part turned on its side is as tall as it is wide. Measuring it unrotated
+  // is how a row ends up overlapping the row below it.
+  const turned = Math.abs(((rotation % 180) + 180) % 180 - 90) < 1;
+  return turned ? { w: h, h: w } : { w, h };
 }
 
 // Parts that share a net, ranked by how much they share. Used to keep a
@@ -154,7 +162,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     const idx = top ? i : i - perEdge;
     const x = startX + idx * termPitch;
     const termH = sizeOf(fpOf(c.terminal)).h;
-    const fuseH = c.fuse ? sizeOf(fpOf(c.fuse)).h : 0;
+    const fuseH = c.fuse ? sizeOf(fpOf(c.fuse), 90).h : 0;
     const swH = c.sw ? sizeOf(fpOf(c.sw)).h : 0;
     if (top) {
       let y = EDGE + termH / 2;
@@ -174,128 +182,157 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     }
   });
 
-  // Converters run down the middle band, each with its own passives around it:
-  // a switching loop wants its parts close, not spread across the board.
-  let cx = EDGE + lugWidth + 8;
-  const midY = height / 2;
-  for (const conv of converters) {
-    const s = sizeOf(fpOf(conv));
-    place(conv, { x: cx + s.w / 2, y: midY });
-    const near = [...neighbours(conv.ref, nl)].sort((a, b) => b[1] - a[1]);
-    let ring = 0;
-    for (const [ref] of near) {
+  // Everything that is not on an edge flows through the middle in groups: a
+  // converter or a chip followed immediately by its own passives, laid out row
+  // by row. Nudging overlapping parts apart pairwise oscillates on a board this
+  // size; flowing them into rows cannot overlap at all.
+  // Start below whatever the top channel row actually occupies, and to the
+  // right of the lug column, so the flow cannot run into a pinned part. The
+  // board grows downward if the flow needs the room, and the bottom row is
+  // re-seated against the final edge afterwards.
+  let topUsed = EDGE;
+  for (const f of board.footprints) {
+    if (!pinned.has(f.ref) || fromBottom.has(f.ref)) continue;
+    if (lugs.includes(f)) continue;
+    topUsed = Math.max(topUsed, f.at.y + sizeOf(fpOf(f), f.rotation).h / 2);
+  }
+  const flowLeft = EDGE + lugWidth + GAP * 2;
+  const midTop = topUsed + GAP * 3;
+  const taken = new Set<string>(placed);
+  const groups: PlacedFootprint[][] = [];
+  const groupFor = (head: PlacedFootprint) => {
+    const group = [head];
+    taken.add(head.ref);
+    for (const [ref] of [...neighbours(head.ref, nl)].sort((a, b) => b[1] - a[1])) {
       const part = byRef.get(ref);
-      if (!part || placed.has(ref) || roles.get(ref) !== "passive") continue;
-      const ps = sizeOf(fpOf(part));
-      const angle = (ring / 8) * Math.PI * 2;
-      const radius = s.w / 2 + ps.w / 2 + GAP + Math.floor(ring / 8) * (ps.h + GAP);
-      place(part, { x: cx + s.w / 2 + Math.cos(angle) * radius, y: midY + Math.sin(angle) * radius });
-      ring++;
-      if (ring > 15) break;
+      if (!part || taken.has(ref) || roles.get(ref) !== "passive") continue;
+      group.push(part);
+      taken.add(ref);
+      if (group.length > 18) break;
     }
-    cx += s.w + 26;
-  }
-
-  // Logic, MCU and radio go together at the far end, away from the switch nodes.
-  const logicX = Math.max(cx + 10, width - 46);
-  let ly = EDGE + 20;
-  for (const role of ["mcu", "rf", "logic", "usb"] as Role[]) {
-    for (const f of of(role)) {
-      if (placed.has(f.ref)) continue;
-      const s = sizeOf(fpOf(f));
-      place(f, { x: logicX + s.w / 2, y: ly + s.h / 2 });
-      ly += s.h + GAP * 2;
-      const near = [...neighbours(f.ref, nl)].sort((a, b) => b[1] - a[1]);
-      let k = 0;
-      for (const [ref] of near) {
-        const part = byRef.get(ref);
-        if (!part || placed.has(ref) || roles.get(ref) !== "passive") continue;
-        const ps = sizeOf(fpOf(part));
-        place(part, { x: logicX + s.w + GAP + ps.w / 2 + (k % 3) * (ps.w + GAP), y: ly - s.h / 2 + Math.floor(k / 3) * (ps.h + GAP) });
-        k++;
-        if (k > 8) break;
-      }
+    return group;
+  };
+  for (const role of ["converter", "mcu", "rf", "logic", "usb"] as Role[]) {
+    for (const head of of(role)) {
+      if (taken.has(head.ref)) continue;
+      groups.push(groupFor(head));
     }
   }
-
-  // Anything left goes near whatever it is most connected to, or into a spare
-  // row rather than on top of something else.
-  let sx = EDGE;
-  let sy = midY + 22;
-  const laneTop = EDGE + 26;
-  const laneBottom = height - EDGE - 26;
   for (const f of board.footprints) {
-    if (placed.has(f.ref)) continue;
-    const near = [...neighbours(f.ref, nl)].sort((a, b) => b[1] - a[1]);
-    const anchor = near.map(([r]) => byRef.get(r)).find((p) => p && placed.has(p.ref));
-    const s = sizeOf(fpOf(f));
-    if (anchor) {
-      const as = sizeOf(fpOf(anchor));
-      place(f, { x: anchor.at.x + as.w / 2 + GAP + s.w / 2, y: anchor.at.y });
-    } else {
-      if (sx + s.w > width - EDGE) {
-        sx = EDGE;
-        sy += 8;
-      }
-      place(f, { x: sx + s.w / 2, y: Math.min(Math.max(sy, laneTop), laneBottom) });
-      sx += s.w + GAP;
-    }
+    if (taken.has(f.ref)) continue;
+    groups.push(groupFor(f));
   }
 
-  // Nudge overlaps apart. Cheap, and better than parts sitting on each other.
-  for (let pass = 0; pass < 4; pass++) {
-    let moved = 0;
-    for (let i = 0; i < board.footprints.length; i++) {
-      for (let j = i + 1; j < board.footprints.length; j++) {
-        const a = board.footprints[i];
-        const b = board.footprints[j];
-        const sa = sizeOf(fpOf(a));
-        const sb = sizeOf(fpOf(b));
-        const dx = Math.abs(a.at.x - b.at.x);
-        const dy = Math.abs(a.at.y - b.at.y);
-        const needX = (sa.w + sb.w) / 2 + 0.6;
-        const needY = (sa.h + sb.h) / 2 + 0.6;
-        if (dx < needX && dy < needY) {
-          const aFixed = pinned.has(a.ref);
-          const bFixed = pinned.has(b.ref);
-          if (aFixed && bFixed) continue; // two edge parts: leave the layout alone
-          const push = needY - dy + 0.4;
-          const dir = a.at.y <= b.at.y ? -1 : 1;
-          if (aFixed) b.at = { x: b.at.x, y: +(b.at.y - dir * push).toFixed(2) };
-          else if (bFixed) a.at = { x: a.at.x, y: +(a.at.y + dir * push).toFixed(2) };
-          else {
-            a.at = { x: a.at.x, y: +(a.at.y + (dir * push) / 2).toFixed(2) };
-            b.at = { x: b.at.x, y: +(b.at.y - (dir * push) / 2).toFixed(2) };
-          }
-          moved++;
-        }
-      }
+  let cx = flowLeft;
+  let cy = midTop;
+  let rowH = 0;
+  const lineWidth = width - EDGE;
+  for (const group of groups) {
+    // Keep a group on one row where it fits, so a chip and its decoupling stay
+    // together instead of being split across the board.
+    const groupW = group.reduce((sum, f) => sum + sizeOf(fpOf(f)).w + GAP, 0);
+    if (cx > flowLeft && cx + Math.min(groupW, lineWidth / 2) > lineWidth) {
+      cx = flowLeft;
+      cy += rowH + GAP * 2;
+      rowH = 0;
     }
-    if (moved === 0) break;
+    for (const f of group) {
+      const sz = sizeOf(fpOf(f));
+      if (cx + sz.w > lineWidth) {
+        cx = flowLeft;
+        cy += rowH + GAP * 2;
+        rowH = 0;
+      }
+      place(f, { x: cx + sz.w / 2, y: cy + sz.h / 2 });
+      cx += sz.w + GAP + COURTYARD;
+      rowH = Math.max(rowH, sz.h + COURTYARD);
+    }
+    cx += GAP * 2;
   }
 
-  let maxX = 0;
-  let maxY = 0;
+  // Size the board from everything except the bottom row, which follows the
+  // edge rather than setting it, then seat that row against the real edge.
+  const heightOf = (f: PlacedFootprint) => sizeOf(fpOf(f), f.rotation).h;
+  let maxY = height;
   for (const f of board.footprints) {
-    if (fromBottom.has(f.ref)) continue; // these follow the edge, not the other way round
-    const s = sizeOf(fpOf(f));
-    maxX = Math.max(maxX, f.at.x + s.w / 2);
-    maxY = Math.max(maxY, f.at.y + s.h / 2);
+    if (fromBottom.has(f.ref)) continue;
+    maxY = Math.max(maxY, f.at.y + heightOf(f) / 2);
   }
-  const finalH = Math.ceil(Math.max(height, maxY + EDGE));
-  // Now the board's real height is known, put the bottom row back on the edge.
+  let finalH = Math.ceil(maxY + EDGE) + 2;
   for (const [ref, d] of fromBottom) {
     const f = byRef.get(ref);
     if (f) f.at = { x: f.at.x, y: +(finalH - d).toFixed(2) };
   }
+
+  // Now nothing moves again, guarantee no two parts overlap. Anything still
+  // colliding goes to a spare area below the board: a part you have to drag is
+  // better than two parts on top of each other, and the DRC stays clean.
+  // The courtyard is not centred on the part's origin - a connector's sits off
+  // to one side - so rotate its actual corners and take the bounding box.
+  const rectOf = (f: PlacedFootprint) => {
+    const fp = fpOf(f);
+    const box = fp?.courtyard ?? fp?.bbox;
+    if (!box) {
+      const sz = sizeOf(fp, f.rotation);
+      return { x1: f.at.x - sz.w / 2, y1: f.at.y - sz.h / 2, x2: f.at.x + sz.w / 2, y2: f.at.y + sz.h / 2 };
+    }
+    // KiCad rotates a footprint counter-clockwise, and PCB space is Y-down, so
+    // the angle is negated to land the courtyard on the side KiCad puts it.
+    const rad = (-f.rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const c of [
+      { x: box.min.x, y: box.min.y },
+      { x: box.max.x, y: box.min.y },
+      { x: box.max.x, y: box.max.y },
+      { x: box.min.x, y: box.max.y },
+    ]) {
+      xs.push(f.at.x + c.x * cos - c.y * sin);
+      ys.push(f.at.y + c.x * sin + c.y * cos);
+    }
+    const pad = 0.15; // a hair, so touching courtyards do not count as overlapping
+    return { x1: Math.min(...xs) - pad, y1: Math.min(...ys) - pad, x2: Math.max(...xs) + pad, y2: Math.max(...ys) + pad };
+  };
+  const hits = (a: ReturnType<typeof rectOf>, b: ReturnType<typeof rectOf>) =>
+    a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+  const accepted: ReturnType<typeof rectOf>[] = [];
+  let spareX = EDGE;
+  let spareY = finalH + GAP * 3;
+  let spareRow = 0;
+  let displaced = 0;
+  // Edge parts are the layout; they get first claim, and the rest move.
+  const order = [...board.footprints].sort((a, b) => Number(pinned.has(b.ref)) - Number(pinned.has(a.ref)));
+  for (const f of order) {
+    let r = rectOf(f);
+    if (accepted.some((a) => hits(a, r))) {
+      const sz = sizeOf(fpOf(f), f.rotation);
+      if (spareX + sz.w > width - EDGE) {
+        spareX = EDGE;
+        spareY += spareRow + GAP * 2;
+        spareRow = 0;
+      }
+      f.at = { x: +(spareX + sz.w / 2).toFixed(2), y: +(spareY + sz.h / 2).toFixed(2) };
+      spareX += sz.w + GAP + COURTYARD;
+      spareRow = Math.max(spareRow, sz.h + COURTYARD);
+      r = rectOf(f);
+      displaced++;
+    }
+    accepted.push(r);
+  }
+  if (displaced) notes.push(`${displaced} parts moved to a spare area below the board so nothing overlaps`);
+
+  let maxX = 0;
   for (const f of board.footprints) {
-    const s = sizeOf(fpOf(f));
-    maxX = Math.max(maxX, f.at.x + s.w / 2);
+    const sz = sizeOf(fpOf(f), f.rotation);
+    maxX = Math.max(maxX, f.at.x + sz.w / 2);
+    finalH = Math.max(finalH, Math.ceil(f.at.y + sz.h / 2 + EDGE));
   }
   board.outline = [
     { x: 0, y: 0 },
-    { x: Math.ceil(Math.max(width, maxX + EDGE)), y: 0 },
-    { x: Math.ceil(Math.max(width, maxX + EDGE)), y: finalH },
+    { x: Math.ceil(Math.max(width, maxX + EDGE)) + 2, y: 0 },
+    { x: Math.ceil(Math.max(width, maxX + EDGE)) + 2, y: finalH },
     { x: 0, y: finalH },
   ];
 

@@ -279,6 +279,7 @@ const SEEDS: Record<string, Seed> = {
   "Device:LED": { priceUsd: 0.1, digikey: true, mouser: true, oshpark: true, footprints: ["LED_SMD:LED_0603_1608Metric", "LED_THT:LED_D5.0mm"] },
   "Device:D": { priceUsd: 0.12, digikey: true, mouser: true, oshpark: true, footprints: ["Diode_SMD:D_SOD-123"] },
   "Device:Q_NPN_BCE": { priceUsd: 0.12, digikey: true, mouser: true, oshpark: false, footprints: ["Package_TO_SOT_SMD:SOT-23"] },
+  "Device:Q_NMOS_GSD": { priceUsd: 0.1, digikey: true, mouser: true, oshpark: true, footprints: ["Package_TO_SOT_SMD:SOT-23"] },
   "Switch:SW_Push": { priceUsd: 0.22, digikey: true, mouser: true, oshpark: false, footprints: ["Button_Switch_SMD:SW_SPST_B3U-1000P"] },
   "Connector:Conn_01x02": { priceUsd: 0.35, digikey: true, mouser: true, oshpark: false, footprints: ["Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"] },
   "power:GND": {},
