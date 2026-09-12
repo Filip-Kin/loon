@@ -65,6 +65,9 @@ export function buildOra(): Schematic {
   ops.push({ op: "instantiate_module", moduleId: "esp32s3_core", at: { x: 430, y: 140 } });
   ops.push({ op: "instantiate_module", moduleId: "usb_c_program", at: { x: 620, y: 60 } });
   ops.push({ op: "instantiate_module", moduleId: "rf_heartbeat", params: { cs_net: "RF_CS" }, at: { x: 620, y: 250 } });
+  // Wired link to whatever actually runs the robot: the board publishes its
+  // e-stop state rather than being asked for it.
+  ops.push({ op: "instantiate_module", moduleId: "ethernet_w5500", at: { x: 620, y: 600 } });
 
   // #region e-stop chain
   ops.push({ op: "instantiate_module", moduleId: "estop_input", params: { net: "ESTOP1" }, at: { x: 430, y: 380 } });
@@ -123,6 +126,10 @@ export function buildOra(): Schematic {
   // #region notes
   const notes: [string, number][] = [
     [
+      "ETHERNET: a W5500 on the SPI bus publishes e-stop state and channel currents to whatever runs the robot. It shares SCK/MOSI/MISO with the radio and has its own chip select, interrupt and reset. The RJ45 has the magnetics in it; the centre taps sit on 3V3 with their own decoupling.",
+      930,
+    ],
+    [
       "E-STOP: two panel e-stops wired fail-safe (NC to GND; pressed OR cut cable = stop) diode-OR into the latch's asynchronous CLR. The MCU joins the same OR through a charge-pump watchdog: it must keep toggling WDT_KICK to stay armed, so a lost RF heartbeat, a pressed remote e-stop, hung firmware or a dead MCU all clear the latch. ARM needs a rising edge from the MCU; an RC on CLR holds the board stopped through power-up.",
       960,
     ],
@@ -173,6 +180,10 @@ export function buildOra(): Schematic {
     "12": "RF_CS", // IO8
     "17": "RF_CE", // IO9
     "18": "RF_IRQ", // IO10
+    // Ethernet controller, on the same SPI bus as the radio.
+    "19": "ETH_CS", // IO11
+    "20": "ETH_INT", // IO12
+    "21": "ETH_RST", // IO13
   };
   const mcuOps: Op[] = [];
   for (const [pin, net] of Object.entries(assign)) {

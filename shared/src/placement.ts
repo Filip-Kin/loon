@@ -58,6 +58,8 @@ export function roleOf(f: PlacedFootprint, fp?: Footprint): Role {
   if (/nrf24|rfm|lora|radio|antenna/.test(v)) return "rf";
   if (/regulator|tps54|lm5175|ap2112|ldo|buck/.test(v)) return "converter";
   if (/logic_|74lvc|flipflop|latch/.test(v)) return "logic";
+  // An Ethernet controller is digital logic, and its jack belongs beside it.
+  if (/w5500|enc28|lan87|ksz8|ethernet|_phy\b/.test(v)) return "logic";
   if (/sw_|button|switch_smd|b3u/.test(v)) return "button";
   if (ref.startsWith("J") || /conn_|terminal|screw|receptacle|rj45/.test(v)) return "terminal";
   if (/^[RCLDQY]/.test(ref)) return "passive";
@@ -444,7 +446,10 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
       .sort((a, b) => b[1] - a[1])
       .map(([ref]) => byRef.get(ref))
       .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
-    const onRight = !!friend && rfClusters.some((r) => r.parts.includes(friend));
+    // The right-hand edge is where the logic lives, so a connector whose
+    // circuit is in there goes with it. Anything else goes left, by the lugs.
+    const onRight =
+      !!friend && (rfClusters.some((r) => r.parts.includes(friend)) || digitalZone.some((d) => d.parts.includes(friend)));
     (onRight ? rightConns : leftConns).push(c);
   }
   for (const c of rightConns) {

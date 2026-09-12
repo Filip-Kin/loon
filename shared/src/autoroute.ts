@@ -135,8 +135,11 @@ export function autoroute(
       const ang = ((f.rotation + pad.rotation) * Math.PI) / 180;
       const ca = Math.abs(Math.cos(ang));
       const sa = Math.abs(Math.sin(ang));
-      const hw = Math.max(0.15, (pad.size.w / 2) * ca + (pad.size.h / 2) * sa);
-      const hh = Math.max(0.15, (pad.size.w / 2) * sa + (pad.size.h / 2) * ca);
+      // A hole needs more room than the copper around it, and a hole with no
+      // copper at all - the keying hole in a fuse holder - still needs it.
+      const holeR = pad.drill ? pad.drill / 2 + 0.25 + trackWidth / 2 : 0;
+      const hw = Math.max(0.15, (pad.size.w / 2) * ca + (pad.size.h / 2) * sa, holeR);
+      const hh = Math.max(0.15, (pad.size.w / 2) * sa + (pad.size.h / 2) * ca, holeR);
       const rx = Math.max(0, Math.round(hw / pitch));
       const ry = Math.max(0, Math.round(hh / pitch));
       for (let dx = -rx; dx <= rx; dx++) {

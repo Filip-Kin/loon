@@ -22,6 +22,10 @@ export type PinType =
   | "power_in"
   | "power_out"
   | "passive"
+  // A shared bus: several parts drive the line, one at a time. Without this an
+  // SPI MISO with two chips on it reads as a short between two outputs.
+  | "tri_state"
+  | "open_collector"
   | "unspecified"
   | "no_connect";
 

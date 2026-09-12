@@ -88,6 +88,8 @@ export function runErc(schem: Schematic, resolve?: DefResolver, netlist?: Netlis
   // 3. Two hard drivers fighting on one net. Duplicate pins of one component
   // are not a fight: a USB-C receptacle has two VBUS pins by design.
   for (const net of nl.nets) {
+    // Tri-state and open-collector pins share a line on purpose; only a pin
+    // that drives all the time can fight another one.
     const outputs = net.pins.filter((p) => p.type === "output" || p.type === "power_out");
     const distinctParts = new Set(outputs.map((o) => o.ref));
     if (outputs.length > 1 && distinctParts.size > 1) {

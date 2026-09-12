@@ -550,6 +550,138 @@ const modules: ModuleDef[] = [
 
   // #region RF heartbeat radio
   {
+    id: "ethernet_w5500",
+    name: "Ethernet port (W5500 + MagJack)",
+    description:
+      "Wired Ethernet on SPI. The ESP32-S3 has no Ethernet MAC, so the network comes in through a W5500 hardwired TCP/IP controller, into an RJ45 with the magnetics inside it. Use this when something else on the robot has to be told what this board is doing - the e-stop state, channel currents - over a cable rather than a radio.",
+    params: [
+      { name: "cs_net", type: "string", default: "ETH_CS", doc: "Chip select net" },
+      { name: "int_net", type: "string", default: "ETH_INT", doc: "Interrupt net" },
+      { name: "rst_net", type: "string", default: "ETH_RST", doc: "Reset net" },
+    ],
+    build(params) {
+      const cs = String(p(params, "cs_net", "ETH_CS"));
+      const irq = String(p(params, "int_net", "ETH_INT"));
+      const rst = String(p(params, "rst_net", "ETH_RST"));
+      return {
+        parts: [
+          { local: "U", libId: "Interface_Ethernet:W5500", value: "W5500", dx: 0, dy: 0 },
+          { local: "J", libId: "Connector:RJ45_MagJack", value: "RJ45 MagJack", dx: 70, dy: 0 },
+          // 25MHz, and the datasheet is specific about it.
+          { local: "Y", libId: "Device:Crystal_GND24", value: "25MHz", dx: -30, dy: 30 },
+          { local: "CY1", libId: "Device:C", value: "22p", dx: -40, dy: 36 },
+          { local: "CY2", libId: "Device:C", value: "22p", dx: -20, dy: 36 },
+          // Biasing for the analog front end. 1% or the PHY drifts.
+          { local: "REX", libId: "Device:R", value: "12.4k 1%", dx: -30, dy: -20 },
+          { local: "CTO", libId: "Device:C", value: "4.7u", dx: -30, dy: -8, footprint: "Capacitor_SMD:C_0805_2012Metric" },
+          { local: "C12", libId: "Device:C", value: "10n", dx: -30, dy: 2 },
+          { local: "CD1", libId: "Device:C", value: "100n", dx: -46, dy: -30 },
+          { local: "CD2", libId: "Device:C", value: "100n", dx: -38, dy: -30 },
+          { local: "CD3", libId: "Device:C", value: "100n", dx: -30, dy: -30 },
+          { local: "CD4", libId: "Device:C", value: "100n", dx: -22, dy: -30 },
+          { local: "CB", libId: "Device:C", value: "10u", dx: -14, dy: -30, footprint: "Capacitor_SMD:C_0805_2012Metric" },
+          // Centre taps sit on the rail with their own decoupling.
+          { local: "CT1", libId: "Device:C", value: "100n", dx: 40, dy: -14 },
+          { local: "CT2", libId: "Device:C", value: "100n", dx: 52, dy: -14 },
+          { local: "RRST", libId: "Device:R", value: "10k", dx: 30, dy: -30 },
+          { local: "RL1", libId: "Device:R", value: "330", dx: 100, dy: -10 },
+          { local: "RL2", libId: "Device:R", value: "330", dx: 100, dy: 10 },
+        ],
+        wires: [],
+        nets: [
+          // Supplies. Every AVDD pin gets the rail; the decoupling sits on it.
+          { local: "U", pin: "4", label: "+3V3" },
+          { local: "U", pin: "8", label: "+3V3" },
+          { local: "U", pin: "11", label: "+3V3" },
+          { local: "U", pin: "15", label: "+3V3" },
+          { local: "U", pin: "17", label: "+3V3" },
+          { local: "U", pin: "21", label: "+3V3" },
+          { local: "U", pin: "28", label: "+3V3" },
+          { local: "U", pin: "3", label: "GND" },
+          { local: "U", pin: "9", label: "GND" },
+          { local: "U", pin: "14", label: "GND" },
+          { local: "U", pin: "16", label: "GND" },
+          { local: "U", pin: "19", label: "GND" },
+          { local: "U", pin: "29", label: "GND" },
+          { local: "U", pin: "48", label: "GND" },
+          // RSVD pin 23 is tied to ground; 38-42 are left open on their own
+          // pull-downs, and PMODE 43-45 float to "all capable, auto-negotiate".
+          { local: "U", pin: "23", label: "GND" },
+          // Analog housekeeping.
+          { local: "U", pin: "10", label: "ETH_EXRES", scope: "local" },
+          { local: "REX", pin: "1", label: "ETH_EXRES", scope: "local" },
+          { local: "REX", pin: "2", label: "GND" },
+          { local: "U", pin: "20", label: "ETH_TOCAP", scope: "local" },
+          { local: "CTO", pin: "1", label: "ETH_TOCAP", scope: "local" },
+          { local: "CTO", pin: "2", label: "GND" },
+          { local: "U", pin: "22", label: "ETH_1V2", scope: "local" },
+          { local: "C12", pin: "1", label: "ETH_1V2", scope: "local" },
+          { local: "C12", pin: "2", label: "GND" },
+          // Clock.
+          { local: "U", pin: "30", label: "ETH_XI", scope: "local" },
+          { local: "U", pin: "31", label: "ETH_XO", scope: "local" },
+          { local: "Y", pin: "1", label: "ETH_XI", scope: "local" },
+          { local: "Y", pin: "3", label: "ETH_XO", scope: "local" },
+          { local: "Y", pin: "2", label: "GND" },
+          { local: "Y", pin: "4", label: "GND" },
+          { local: "CY1", pin: "1", label: "ETH_XI", scope: "local" },
+          { local: "CY1", pin: "2", label: "GND" },
+          { local: "CY2", pin: "1", label: "ETH_XO", scope: "local" },
+          { local: "CY2", pin: "2", label: "GND" },
+          // The SPI bus, shared with the radio; only the chip select is its own.
+          { local: "U", pin: "32", label: cs },
+          { local: "U", pin: "33", label: "SPI_SCK" },
+          { local: "U", pin: "34", label: "SPI_MISO" },
+          { local: "U", pin: "35", label: "SPI_MOSI" },
+          { local: "U", pin: "36", label: irq },
+          { local: "U", pin: "37", label: rst },
+          { local: "RRST", pin: "1", label: "+3V3" },
+          { local: "RRST", pin: "2", label: rst },
+          // The wire itself. 1:1 transformers inside the jack, centre taps on
+          // the rail.
+          { local: "U", pin: "2", label: "ETH_TXP", scope: "local" },
+          { local: "U", pin: "1", label: "ETH_TXN", scope: "local" },
+          { local: "U", pin: "6", label: "ETH_RXP", scope: "local" },
+          { local: "U", pin: "5", label: "ETH_RXN", scope: "local" },
+          { local: "J", pin: "R1", label: "ETH_TXP", scope: "local" },
+          { local: "J", pin: "R2", label: "ETH_TXN", scope: "local" },
+          { local: "J", pin: "R3", label: "ETH_RXP", scope: "local" },
+          { local: "J", pin: "R6", label: "ETH_RXN", scope: "local" },
+          { local: "J", pin: "R4", label: "+3V3" },
+          { local: "J", pin: "R5", label: "+3V3" },
+          { local: "J", pin: "R8", label: "GND" },
+          { local: "CT1", pin: "1", label: "+3V3" },
+          { local: "CT1", pin: "2", label: "GND" },
+          { local: "CT2", pin: "1", label: "+3V3" },
+          { local: "CT2", pin: "2", label: "GND" },
+          // Link and activity lights. The W5500 sinks them, so the anode is on
+          // the rail.
+          { local: "RL1", pin: "1", label: "+3V3" },
+          { local: "RL1", pin: "2", label: "ETH_LEDG_A", scope: "local" },
+          { local: "J", pin: "L4", label: "ETH_LEDG_A", scope: "local" },
+          { local: "J", pin: "L3", label: "ETH_LINK", scope: "local" },
+          { local: "U", pin: "25", label: "ETH_LINK", scope: "local" },
+          { local: "RL2", pin: "1", label: "+3V3" },
+          { local: "RL2", pin: "2", label: "ETH_LEDY_A", scope: "local" },
+          { local: "J", pin: "L1", label: "ETH_LEDY_A", scope: "local" },
+          { local: "J", pin: "L2", label: "ETH_ACT", scope: "local" },
+          { local: "U", pin: "27", label: "ETH_ACT", scope: "local" },
+          // Decoupling.
+          { local: "CD1", pin: "1", label: "+3V3" },
+          { local: "CD1", pin: "2", label: "GND" },
+          { local: "CD2", pin: "1", label: "+3V3" },
+          { local: "CD2", pin: "2", label: "GND" },
+          { local: "CD3", pin: "1", label: "+3V3" },
+          { local: "CD3", pin: "2", label: "GND" },
+          { local: "CD4", pin: "1", label: "+3V3" },
+          { local: "CD4", pin: "2", label: "GND" },
+          { local: "CB", pin: "1", label: "+3V3" },
+          { local: "CB", pin: "2", label: "GND" },
+        ],
+      };
+    },
+  },
+  {
     id: "rf_heartbeat",
     name: "RF module for the remote e-stop heartbeat",
     description:
