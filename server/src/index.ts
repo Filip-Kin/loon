@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./routers";
+import { storage } from "./services/storage";
 import { LOON_CONTRACT_VERSION, type LoonManifest } from "@loon/shared/contract";
 import { probeHub, type ProbeSocketData } from "./services/probe-hub";
 import { join } from "node:path";
@@ -65,6 +66,25 @@ const server = Bun.serve<ProbeSocketData, {}>({
       });
       cors(res.headers);
       return res;
+    }
+
+    // Firmware images for browser flashing. Raw bytes, because base64 through
+    // tRPC would triple the size of every build artifact.
+    if (url.pathname.startsWith("/artifact/")) {
+      const rest = decodeURIComponent(url.pathname.slice("/artifact/".length));
+      const slash = rest.indexOf("/");
+      if (slash > 0) {
+        const project = rest.slice(0, slash);
+        const rel = rest.slice(slash + 1);
+        try {
+          const bytes = await storage.readBinary(project, rel);
+          return new Response(bytes, {
+            headers: cors(new Headers({ "content-type": "application/octet-stream", "cache-control": "no-store" })),
+          });
+        } catch {
+          return new Response("not found", { status: 404, headers: cors(new Headers()) });
+        }
+      }
     }
 
     // Static web build (prod). In dev, vite serves the UI and proxies /trpc.

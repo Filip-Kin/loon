@@ -1,12 +1,20 @@
 // #region Storage
-// Projects load/save straight to the filesystem. On the home server the project
-// directory is simply a folder inside the Nextcloud data tree, so saved files
-// sync to Nextcloud with no WebDAV round trip. Point LOON_FS_DIR at an ncdata
-// path in production; the dev default keeps files inside the repo.
-// A "project" is currently a single .kicad_sch file addressed by name.
+// A project is a folder, not a file, because a design is a schematic plus a
+// board plus firmware plus fab output. On the home server the project directory
+// sits inside the Nextcloud data tree, so everything syncs with no WebDAV round
+// trip. Point LOON_FS_DIR at an ncdata path in production.
+//
+//   MyBoard/
+//     board.kicad_sch
+//     board.kicad_pcb      (later)
+//     firmware/            platformio project
+//     fab/                 gerbers, BOM
+//
+// Projects saved by the flat-file version are migrated into a folder on first
+// open, and the original file is kept as a .bak rather than deleted.
 
-import { mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, writeFile, stat, rename, rm } from "node:fs/promises";
+import { join, dirname, normalize } from "node:path";
 
 export interface ProjectMeta {
   name: string;
@@ -15,10 +23,19 @@ export interface ProjectMeta {
 }
 
 const SCH_EXT = ".kicad_sch";
+const SCH_FILE = "board.kicad_sch";
 
 function safeName(name: string): string {
   const base = name.replace(/[^A-Za-z0-9._-]/g, "_");
-  return base.endsWith(SCH_EXT) ? base : base + SCH_EXT;
+  return base.endsWith(SCH_EXT) ? base.slice(0, -SCH_EXT.length) : base;
+}
+
+// Keep every path inside the project folder: a name from the browser must not
+// be able to walk out of the workspace.
+function safeRelative(rel: string): string {
+  const clean = normalize(rel).replace(/^(\.\.(\/|\\|$))+/, "");
+  if (clean.startsWith("/") || clean.includes("..")) throw new Error(`Bad path: ${rel}`);
+  return clean;
 }
 
 class Storage {
@@ -28,26 +45,113 @@ class Storage {
     await mkdir(this.dir, { recursive: true });
   }
 
+  projectDir(name: string): string {
+    return join(this.dir, safeName(name));
+  }
+
+  private schPath(name: string): string {
+    return join(this.projectDir(name), SCH_FILE);
+  }
+
+  // Move a flat <name>.kicad_sch into <name>/board.kicad_sch, keeping a .bak.
+  private async migrateIfNeeded(name: string): Promise<void> {
+    const flat = join(this.dir, `${safeName(name)}${SCH_EXT}`);
+    try {
+      await stat(this.schPath(name));
+      return; // already a folder project
+    } catch {
+      /* fall through */
+    }
+    try {
+      const text = await readFile(flat, "utf8");
+      await mkdir(this.projectDir(name), { recursive: true });
+      await writeFile(this.schPath(name), text, "utf8");
+      await rename(flat, `${flat}.bak`);
+    } catch {
+      /* no flat file: nothing to migrate */
+    }
+  }
+
   async list(): Promise<ProjectMeta[]> {
     await this.ensure();
-    const files = await readdir(this.dir);
+    const entries = await readdir(this.dir, { withFileTypes: true });
     const out: ProjectMeta[] = [];
-    for (const f of files) {
-      if (!f.endsWith(SCH_EXT)) continue;
-      const s = await stat(join(this.dir, f));
-      out.push({ name: f.slice(0, -SCH_EXT.length), updated: s.mtimeMs, size: s.size });
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        try {
+          const s = await stat(join(this.dir, e.name, SCH_FILE));
+          out.push({ name: e.name, updated: s.mtimeMs, size: s.size });
+        } catch {
+          /* a folder without a board is not a project */
+        }
+      } else if (e.name.endsWith(SCH_EXT)) {
+        const s = await stat(join(this.dir, e.name));
+        out.push({ name: e.name.slice(0, -SCH_EXT.length), updated: s.mtimeMs, size: s.size });
+      }
     }
-    return out.sort((a, b) => b.updated - a.updated);
+    // Deduplicate: a migrated project can briefly appear twice.
+    const seen = new Map<string, ProjectMeta>();
+    for (const m of out) {
+      const prev = seen.get(m.name);
+      if (!prev || m.updated > prev.updated) seen.set(m.name, m);
+    }
+    return [...seen.values()].sort((a, b) => b.updated - a.updated);
   }
 
   async read(name: string): Promise<string> {
     await this.ensure();
-    return readFile(join(this.dir, safeName(name)), "utf8");
+    await this.migrateIfNeeded(name);
+    return readFile(this.schPath(name), "utf8");
   }
 
   async write(name: string, content: string): Promise<void> {
     await this.ensure();
-    await writeFile(join(this.dir, safeName(name)), content, "utf8");
+    await mkdir(this.projectDir(name), { recursive: true });
+    await writeFile(this.schPath(name), content, "utf8");
+  }
+
+  // #region project files (firmware, fab output, anything else)
+  async listFiles(name: string, sub = ""): Promise<{ path: string; size: number; updated: number }[]> {
+    const root = join(this.projectDir(name), safeRelative(sub));
+    const out: { path: string; size: number; updated: number }[] = [];
+    const walk = async (dir: string, prefix: string) => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (e.name === ".pio" || e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const rel = prefix ? `${prefix}/${e.name}` : e.name;
+        if (e.isDirectory()) await walk(join(dir, e.name), rel);
+        else {
+          const s = await stat(join(dir, e.name));
+          out.push({ path: rel, size: s.size, updated: s.mtimeMs });
+        }
+      }
+    };
+    await walk(root, "");
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async readFile(name: string, rel: string): Promise<string> {
+    return readFile(join(this.projectDir(name), safeRelative(rel)), "utf8");
+  }
+
+  async writeFile(name: string, rel: string, content: string): Promise<void> {
+    const full = join(this.projectDir(name), safeRelative(rel));
+    await mkdir(dirname(full), { recursive: true });
+    await writeFile(full, content, "utf8");
+  }
+
+  async readBinary(name: string, rel: string): Promise<Uint8Array> {
+    const buf = await readFile(join(this.projectDir(name), safeRelative(rel)));
+    return new Uint8Array(buf);
+  }
+
+  async deleteFile(name: string, rel: string): Promise<void> {
+    await rm(join(this.projectDir(name), safeRelative(rel)), { force: true });
   }
 }
 

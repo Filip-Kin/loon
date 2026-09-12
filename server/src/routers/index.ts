@@ -2,11 +2,13 @@ import { z } from "zod";
 import { router, publicProcedure } from "../trpc";
 import { library } from "../services/library";
 import { storage } from "../services/storage";
-import { generateOps } from "../services/ai";
+import { generateOps, generateFirmware } from "../services/ai";
 import { probeHub } from "../services/probe-hub";
 import { parseSchematic, serializeSchematic } from "@loon/shared/kicad-sch";
 import { buildNetlist } from "@loon/shared/netlist";
 import { runErc } from "@loon/shared/erc";
+import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainStub } from "@loon/shared/firmware";
+import { startBuild, getBuild, listBuilds } from "../services/build";
 import { emptySchematic, type Schematic, type LibSymbol } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
 import type { SxList } from "@loon/shared/sexpr";
@@ -180,8 +182,107 @@ const designRouter = router({
     }),
 });
 
+// #region firmware
+// The board's own pinout generates the header, so firmware never retypes it.
+const firmwareRouter = router({
+  files: publicProcedure
+    .input(z.object({ project: z.string() }))
+    .query(({ input }) => storage.listFiles(input.project, "firmware")),
+
+  read: publicProcedure
+    .input(z.object({ project: z.string(), path: z.string() }))
+    .query(async ({ input }) => ({ text: await storage.readFile(input.project, `firmware/${input.path}`) })),
+
+  write: publicProcedure
+    .input(z.object({ project: z.string(), path: z.string(), text: z.string() }))
+    .mutation(async ({ input }) => {
+      await storage.writeFile(input.project, `firmware/${input.path}`, input.text);
+      return { ok: true };
+    }),
+
+  // Regenerate the pin header from the current sheet, and scaffold the project
+  // the first time. Only board_pins.h is ever overwritten.
+  sync: publicProcedure
+    .input(z.object({ project: z.string(), schem: z.any() }))
+    .mutation(async ({ input }) => {
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      const targets = firmwareTargets(schem, defs);
+      if (targets.length === 0) return { ok: false, message: "No MCU on the sheet to generate a pin map from." };
+      const target = targets[0];
+      await storage.writeFile(input.project, "firmware/include/board_pins.h", generatePinsHeader(target));
+      const scaffold = async (path: string, text: string) => {
+        try {
+          await storage.readFile(input.project, path);
+        } catch {
+          await storage.writeFile(input.project, path, text);
+        }
+      };
+      await scaffold("firmware/platformio.ini", generatePlatformIni(target));
+      await scaffold("firmware/src/main.cpp", generateMainStub(target));
+      return {
+        ok: true,
+        message: `${target.pins.length} pins mapped from ${target.ref} (${target.profile.name}).`,
+        pins: target.pins,
+      };
+    }),
+
+  build: publicProcedure
+    .input(z.object({ project: z.string() }))
+    .mutation(({ input }) => ({ id: startBuild(input.project).id })),
+
+  buildStatus: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const job = getBuild(input.id);
+      if (!job) return { state: "error" as const, log: "", error: "That build is gone (the server restarted)." };
+      return { state: job.state, log: job.log.slice(-20000), error: job.error, artifacts: job.artifacts, elapsedMs: Date.now() - job.started };
+    }),
+
+  // The assistant writes firmware as a job too: it takes as long as a design
+  // edit, and writes whole files rather than ops.
+  aiStart: publicProcedure
+    .input(z.object({ project: z.string(), message: z.string(), schem: z.any() }))
+    .mutation(({ input }) => {
+      reapJobs();
+      const id = crypto.randomUUID();
+      const job: AiJob = { id, started: Date.now(), state: "running" };
+      aiJobs.set(id, job);
+      (async () => {
+        try {
+          const files = await storage.listFiles(input.project, "firmware");
+          const existing = await Promise.all(
+            files
+              .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
+              .slice(0, 20)
+              .map(async (f) => ({ path: f.path, content: await storage.readFile(input.project, `firmware/${f.path}`) })),
+          );
+          const res = await generateFirmware(input.message, input.schem as Schematic, existing);
+          const written: string[] = [];
+          for (const f of res.files) {
+            if (f.path.includes("board_pins.h")) continue; // generated, never authored
+            await storage.writeFile(input.project, `firmware/${f.path}`, f.content);
+            written.push(f.path);
+          }
+          job.message = `${res.message}${written.length ? ` (wrote ${written.join(", ")})` : ""}`;
+          job.ops = written as unknown[];
+          job.state = "done";
+        } catch (e: any) {
+          job.error = String(e?.message ?? e);
+          job.state = "error";
+        }
+      })();
+      return { id };
+    }),
+
+  builds: publicProcedure
+    .input(z.object({ project: z.string() }))
+    .query(({ input }) => listBuilds(input.project).map((b) => ({ id: b.id, state: b.state, started: b.started }))),
+});
+
 export const appRouter = router({
   design: designRouter,
+  firmware: firmwareRouter,
   library: librouter,
   project: projectRouter,
   ai: aiRouter,

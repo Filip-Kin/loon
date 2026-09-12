@@ -116,6 +116,21 @@ svg.canvas.panning { cursor: grabbing; }
 .mod-row .name { font-size: 13px; }
 .mod-row .desc { font-size: 11.5px; color: var(--text-faint); line-height: 1.35; }
 
+.codeview { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.codebar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.codebar .spacer { flex: 1; }
+.codebody { flex: 1; display: flex; min-height: 0; }
+.filetree { width: 230px; border-right: 1px solid var(--line); overflow: auto; padding: 6px 0; }
+.file-row { padding: 4px 10px; font-size: 12px; font-family: ui-monospace, monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row:hover { background: var(--panel-2); }
+.file-row.on { background: rgba(124,58,237,0.18); }
+.editorhost { flex: 1; min-width: 0; overflow: hidden; }
+.askbar { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); }
+.askbar input { flex: 1; }
+.askbar .status { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.buildlog { height: 190px; overflow: auto; margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: #0b0c10; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; color: #b9c0cc; }
+
 .check { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .check-head { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .check-head button { margin-left: auto; }

@@ -15,6 +15,7 @@ import { pinBudget, formatBudget } from "@loon/shared/pinbudget";
 import { buildNetlist, formatNetlist } from "@loon/shared/netlist";
 import { runErc, formatErc } from "@loon/shared/erc";
 import { buildBlockGraph } from "@loon/shared/blockgraph";
+import { firmwareTargets } from "@loon/shared/firmware";
 import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
 
@@ -231,6 +232,72 @@ async function runClaude(prompt: string): Promise<string> {
     // Not the envelope; treat stdout as the raw reply.
   }
   return stdout;
+}
+
+// #region firmware authoring
+// Same bridge, different contract: the model returns files, not ops. It gets
+// the generated pin map and the netlist, so the code it writes uses the board's
+// own net names instead of pin numbers it guessed.
+export interface AiFiles {
+  message: string;
+  files: { path: string; content: string }[];
+  raw: string;
+}
+
+function firmwarePrompt(userMessage: string, schem: Schematic, existing: { path: string; content: string }[]): string {
+  const targets = firmwareTargets(schem, defResolver);
+  const t = targets[0];
+  const pinLines = t
+    ? t.pins.map((p) => `- ${p.symbol} = GPIO${p.gpio} (net ${p.net}${p.strapping ? `, STRAPPING: ${p.strapping}` : ""}${p.adc ? `, ADC${p.adc.unit}` : ""})`).join("\n")
+    : "(no MCU wired yet)";
+  const files = existing.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+  return `You are the firmware assistant inside Loon, an electronics design tool. You write firmware for the board the user just designed, in the same document.
+
+OUTPUT CONTRACT: respond with ONLY a single JSON object, no prose, no markdown fences:
+{"message": "<one short sentence>", "files": [{"path": "src/main.cpp", "content": "<the whole file>"}]}
+Paths are relative to the firmware/ folder. Return the COMPLETE content of every file you change. Never return a diff or a fragment.
+Never write include/board_pins.h: it is generated from the schematic and your edits would be overwritten.
+
+TARGET: ${t ? `${t.profile.name} (${t.ref})` : "unknown"}, PlatformIO with the Arduino framework.
+
+PIN MAP (use these constants from "board_pins.h", never a raw GPIO number):
+${pinLines}
+
+PART RULES:
+${t ? t.profile.rules.map((r) => `- ${r}`).join("\n") : ""}
+
+NETS ON THE BOARD:
+${netlistContext(schem)}
+
+BLOCKS:
+${blockContext(schem)}
+
+EXISTING FIRMWARE FILES:
+${files || "(none yet)"}
+
+USER REQUEST:
+${userMessage}
+
+Write firmware that matches what the hardware actually does. If the board has a hardware e-stop latch with a watchdog charge pump, the firmware must keep toggling the kick pin to stay armed and must stop toggling to trip it - do not invent a different mechanism. Remember: output only the JSON object.`;
+}
+
+export async function generateFirmware(
+  userMessage: string,
+  schem: Schematic,
+  existing: { path: string; content: string }[],
+): Promise<AiFiles> {
+  const raw = await runClaude(firmwarePrompt(userMessage, schem, existing));
+  let t = raw.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start >= 0 && end > start) t = t.slice(start, end + 1);
+  const parsed = JSON.parse(t);
+  const files = Array.isArray(parsed.files)
+    ? parsed.files.filter((f: any) => typeof f?.path === "string" && typeof f?.content === "string")
+    : [];
+  return { message: typeof parsed.message === "string" ? parsed.message : "", files, raw };
 }
 
 export async function generateOps(userMessage: string, schem: Schematic): Promise<AiResult> {
