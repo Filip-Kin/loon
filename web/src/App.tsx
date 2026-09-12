@@ -195,7 +195,7 @@ export function App() {
     if (!schem) return;
     setChecking(true);
     try {
-      const res = await trpc.design.check.query({ schem });
+      const res = await trpc.design.check.mutate({ schem });
       setIssues(res.issues as ErcIssue[]);
       setNets(res.nets);
     } catch (e: any) {

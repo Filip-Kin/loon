@@ -50,7 +50,7 @@ export function PcbCanvas({ project, schem, flash }: Props) {
     (async () => {
       const res = await trpc.pcb.load.query({ project });
       if (res.board) setBoard(res.board as Board);
-      if (schem) setFps(await trpc.pcb.footprints.query({ schem }));
+      if (schem) setFps(await trpc.pcb.footprints.mutate({ schem }));
     })().catch((e) => flash(String(e?.message ?? e), true));
   }, [project]);
 
@@ -62,7 +62,7 @@ export function PcbCanvas({ project, schem, flash }: Props) {
     try {
       const res = await trpc.pcb.generate.mutate({ project, schem, keepPlacement });
       setBoard(res.board as Board);
-      setFps(await trpc.pcb.footprints.query({ schem }));
+      setFps(await trpc.pcb.footprints.mutate({ schem }));
       const notes: string[] = [`Placed ${res.placed} parts.`];
       if (res.missingFootprints.length) notes.push(`${res.missingFootprints.length} parts have no footprint set.`);
       if (res.approximate.length) notes.push(`${res.approximate.length} land patterns are generated, not KiCad's: check before ordering.`);

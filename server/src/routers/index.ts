@@ -182,9 +182,11 @@ const probeRouter = router({
 
 // Connectivity and rule checks over whatever the browser currently has.
 const designRouter = router({
+  // A mutation, not a query: the schematic travels in the body. As a query its
+  // JSON went into the URL and a real board blew past the header size limit.
   check: publicProcedure
     .input(z.object({ schem: z.any() }))
-    .query(({ input }) => {
+    .mutation(({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
       const nl = buildNetlist(schem, defs);
@@ -302,7 +304,7 @@ const pcbRouter = router({
   // cached. Returned to the browser so the canvas can draw real land patterns.
   footprints: publicProcedure
     .input(z.object({ schem: z.any() }))
-    .query(async ({ input }) => {
+    .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
       const specs = new Map<string, number>();
       for (const s of schem.symbols) {
@@ -383,7 +385,7 @@ const pcbRouter = router({
 
   check: publicProcedure
     .input(z.object({ board: z.any() }))
-    .query(async ({ input }) => {
+    .mutation(async ({ input }) => {
       const board = input.board as Board;
       const footprints = await getFootprints(board.footprints.map((f) => ({ libId: f.libId, padCount: 2 })));
       const rats = ratsnest(board, footprints);
@@ -396,7 +398,7 @@ const pcbRouter = router({
 const simRouter = router({
   deck: publicProcedure
     .input(z.object({ schem: z.any(), bench: z.any() }))
-    .query(({ input }) => {
+    .mutation(({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
       return buildSpiceDeck(schem, input.bench as SpiceBench, defs);
