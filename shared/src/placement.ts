@@ -105,32 +105,55 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const usedFuse = new Set<string>();
   const usedSw = new Set<string>();
   for (const t of terminals) {
+    // A terminal is not wired to its breaker directly - the current goes
+    // breaker, switch, terminal - so following one hop finds nothing. Walk two.
     const near = neighbours(t.ref, nl);
-    const fuse = fuses
-      .filter((f) => !usedFuse.has(f.ref))
-      .sort((a, b) => (near.get(b.ref) ?? 0) - (near.get(a.ref) ?? 0))[0];
-    if (fuse && (near.get(fuse.ref) ?? 0) > 0) usedFuse.add(fuse.ref);
-    const fuseNear = fuse ? neighbours(fuse.ref, nl) : new Map<string, number>();
-    const sw = switches
-      .filter((s) => !usedSw.has(s.ref))
-      .sort((a, b) => ((fuseNear.get(b.ref) ?? 0) + (near.get(b.ref) ?? 0)) - ((fuseNear.get(a.ref) ?? 0) + (near.get(a.ref) ?? 0)))[0];
-    if (sw && ((fuseNear.get(sw.ref) ?? 0) + (near.get(sw.ref) ?? 0)) > 0) usedSw.add(sw.ref);
-    channels.push({
-      terminal: t,
-      fuse: fuse && usedFuse.has(fuse.ref) ? fuse : undefined,
-      sw: sw && usedSw.has(sw.ref) ? sw : undefined,
-    });
+    const pick = (cands: PlacedFootprint[], used: Set<string>, from: Map<string, number>) =>
+      cands
+        .filter((c) => !used.has(c.ref) && (from.get(c.ref) ?? 0) > 0)
+        .sort((a, b) => (from.get(b.ref) ?? 0) - (from.get(a.ref) ?? 0))[0];
+
+    const sw = pick(switches, usedSw, near);
+    if (sw) usedSw.add(sw.ref);
+    const swNear = sw ? neighbours(sw.ref, nl) : new Map<string, number>();
+    // The breaker is next to the switch on a switched channel, and next to the
+    // terminal itself on an always-on one.
+    const fuse = pick(fuses, usedFuse, swNear) ?? pick(fuses, usedFuse, near);
+    if (fuse) usedFuse.add(fuse.ref);
+    channels.push({ terminal: t, fuse, sw });
   }
 
-  // Board size follows from how many channels have to line an edge.
+  // The board should come out wider than it is tall, so the screw terminals run
+  // along the long sides where a loom can reach them. Width is whichever is
+  // larger: the room the channels need, or the room everything else needs laid
+  // out about twice as wide as it is deep.
   const perEdge = Math.max(1, Math.ceil(channels.length / 2));
   const termPitch = Math.max(
     12,
     ...channels.map((c) => sizeOf(fpOf(c.terminal)).w + GAP * 2),
   );
   const lugWidth = lugs.length ? Math.max(...lugs.map((l) => sizeOf(fpOf(l)).w)) + EDGE * 2 : 0;
-  const width = Math.max(90, lugWidth + perEdge * termPitch + EDGE * 2);
+  let loose = 0;
+  for (const f of board.footprints) {
+    const sz = sizeOf(fpOf(f));
+    loose += (sz.w + GAP) * (sz.h + GAP);
+  }
+  const byArea = Math.sqrt(loose * 2.2 * 4); // area x packing factor, at 4:1
+  const width = Math.max(120, lugWidth + perEdge * termPitch + EDGE * 2, byArea);
   const height = Math.max(70, 60 + converters.length * 6);
+
+  // A part's courtyard is not centred on its origin - a screw terminal's body
+  // sits to one side - so placing the origin at a target leaves the courtyard
+  // somewhere else, which is how a row ends up on top of the row above it.
+  // Every placement below positions the courtyard's centre.
+  const centreOffset = (fp: Footprint | undefined, rotation: number): Point => {
+    const box = fp?.courtyard ?? fp?.bbox;
+    if (!box) return { x: 0, y: 0 };
+    const cx = (box.min.x + box.max.x) / 2;
+    const cy = (box.min.y + box.max.y) / 2;
+    const rad = (-rotation * Math.PI) / 180;
+    return { x: cx * Math.cos(rad) - cy * Math.sin(rad), y: cx * Math.sin(rad) + cy * Math.cos(rad) };
+  };
 
   const placed = new Set<string>();
   // Parts whose position is the point of the layout: a terminal belongs on the
@@ -138,7 +161,8 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const pinned = new Set<string>();
   const place = (f: PlacedFootprint | undefined, at: Point, rotation = 0, fix = false) => {
     if (!f) return;
-    f.at = { x: +at.x.toFixed(2), y: +at.y.toFixed(2) };
+    const off = centreOffset(fpOf(f), rotation);
+    f.at = { x: +(at.x - off.x).toFixed(2), y: +(at.y - off.y).toFixed(2) };
     f.rotation = rotation;
     placed.add(f.ref);
     if (fix) pinned.add(f.ref);
@@ -158,8 +182,10 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   // the outside, then its breaker, then its switch, marching inward.
   const startX = EDGE + lugWidth + termPitch / 2;
   channels.forEach((c, i) => {
-    const top = i < perEdge;
-    const idx = top ? i : i - perEdge;
+    // Alternate sides rather than filling one edge then the other, so channel
+    // n and channel n+1 sit opposite each other instead of a board apart.
+    const top = i % 2 === 0;
+    const idx = Math.floor(i / 2);
     const x = startX + idx * termPitch;
     const termH = sizeOf(fpOf(c.terminal)).h;
     const fuseH = c.fuse ? sizeOf(fpOf(c.fuse), 90).h : 0;
@@ -261,7 +287,11 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   let finalH = Math.ceil(maxY + EDGE) + 2;
   for (const [ref, d] of fromBottom) {
     const f = byRef.get(ref);
-    if (f) f.at = { x: f.at.x, y: +(finalH - d).toFixed(2) };
+    if (!f) continue;
+    // Same correction as when it was first placed: d is where the courtyard's
+    // centre belongs, not where the part's origin goes.
+    const off = centreOffset(fpOf(f), f.rotation);
+    f.at = { x: f.at.x, y: +(finalH - d - off.y).toFixed(2) };
   }
 
   // Now nothing moves again, guarantee no two parts overlap. Anything still
@@ -302,6 +332,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   let spareY = finalH + GAP * 3;
   let spareRow = 0;
   let displaced = 0;
+  const displacedRefs: string[] = [];
   // Edge parts are the layout; they get first claim, and the rest move.
   const order = [...board.footprints].sort((a, b) => Number(pinned.has(b.ref)) - Number(pinned.has(a.ref)));
   for (const f of order) {
@@ -318,10 +349,11 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
       spareRow = Math.max(spareRow, sz.h + COURTYARD);
       r = rectOf(f);
       displaced++;
+      displacedRefs.push(f.ref);
     }
     accepted.push(r);
   }
-  if (displaced) notes.push(`${displaced} parts moved to a spare area below the board so nothing overlaps`);
+  if (displaced) notes.push(`${displaced} parts moved to a spare area below the board so nothing overlaps (${displacedRefs.slice(0, 8).join(", ")}${displacedRefs.length > 8 ? ", ..." : ""})`);
 
   let maxX = 0;
   for (const f of board.footprints) {
