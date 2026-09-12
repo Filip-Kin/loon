@@ -26,6 +26,9 @@ const ALWAYS_ON = 2; // controller and radio: never switched
 // Verified against KiCad's 9.0 footprint library.
 const FP_TERMINAL = "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-3-2-5.08_1x02_P5.08mm_Horizontal"; // 12AWG screw terminal
 const FP_LUG_PAD = "MountingHole:MountingHole_6.4mm_M6_DIN965_Pad_TopBottom"; // M6 stud for a 6AWG ring lug
+// Four ways off each regulated rail. They share the rail's breaker, so this is
+// a terminal block, not four fused outputs.
+const FP_RAIL_BLOCK = "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-3-8-5.08_1x08_P5.08mm_Horizontal";
 
 export function buildOra(): Schematic {
   const schem = emptySchematic(crypto.randomUUID());
@@ -42,10 +45,14 @@ export function buildOra(): Schematic {
   const label = (ref: string, pin: string, text: string) => pinLabels.push({ ref, pin, text });
 
   // #region power in
-  ops.push({ op: "add_symbol", libId: "Connector:Conn_01x02", ref: "J1", value: "24V IN 6AWG lug", at: { x: 30, y: 40 } });
+  // Two studs, because a battery needs a way back. One lug carrying +24V and
+  // no return is a board that does nothing.
+  ops.push({ op: "add_symbol", libId: "Connector_Generic:Conn_01x01", ref: "J1", value: "24V IN 6AWG lug", at: { x: 30, y: 30 } });
   footprints.push(["J1", FP_LUG_PAD]);
   label("J1", "1", "+24V");
-  label("J1", "2", "GND");
+  ops.push({ op: "add_symbol", libId: "Connector_Generic:Conn_01x01", ref: "J2", value: "24V RETURN 6AWG lug", at: { x: 30, y: 60 } });
+  footprints.push(["J2", FP_LUG_PAD]);
+  label("J2", "1", "GND");
 
   // #region rails
   ops.push({ op: "instantiate_module", moduleId: "buck_24v", params: { vout: 5, vin_net: "+24V", vout_net: "+5V" }, at: { x: 60, y: 90 } });
@@ -99,13 +106,17 @@ export function buildOra(): Schematic {
     ["+5V", "5V accessory", 860],
   ];
   accessories.forEach(([rail, name, y], i) => {
-    ops.push({ op: "add_symbol", libId: "Device:Fuse", ref: `F${20 + i}`, value: `ATO ${rail === "+20V" ? "8A" : rail === "+12V" ? "10A" : "15A"}`, at: { x: 260, y } });
+    ops.push({ op: "add_symbol", libId: "Device:Fuse", ref: `F${20 + i}`, value: `ATO ${rail === "+20V" ? "10A" : rail === "+12V" ? "10A" : "15A"}`, at: { x: 260, y } });
     label(`F${20 + i}`, "1", rail);
     label(`F${20 + i}`, "2", `${rail}_OUT`);
-    ops.push({ op: "add_symbol", libId: "Connector:Conn_01x02", ref: `J${30 + i}`, value: `${name} OUT`, at: { x: 360, y } });
-    footprints.push([`J${30 + i}`, FP_TERMINAL]);
-    label(`J${30 + i}`, "1", `${rail}_OUT`);
-    label(`J${30 + i}`, "2", "GND");
+    // Four output pairs per rail on one 8-way block, all behind the rail's own
+    // breaker: the loads on a 5V rail do not each need their own fuse.
+    ops.push({ op: "add_symbol", libId: "Connector_Generic:Conn_01x08", ref: `J${30 + i}`, value: `${name} OUT x4`, at: { x: 360, y } });
+    footprints.push([`J${30 + i}`, FP_RAIL_BLOCK]);
+    for (let k = 0; k < 4; k++) {
+      label(`J${30 + i}`, `${k * 2 + 1}`, `${rail}_OUT`);
+      label(`J${30 + i}`, `${k * 2 + 2}`, "GND");
+    }
   });
 
   // #region notes
@@ -116,7 +127,7 @@ export function buildOra(): Schematic {
     ],
     [`CHANNELS: CH1-CH${SWITCHED} are switched by the latch through TPS27S100B high-side switches. CH${SWITCHED + 1}-CH${SWITCHED + ALWAYS_ON} are always-on for the radio and the controller. Every channel runs through a self-resetting ATO breaker into a 12AWG screw terminal.`, 1000],
     ["RAILS: 5V and 12V from TPS54360 bucks (60V parts: a 24V pack under regen overshoots). 20V from an LM5175 buck-boost, because the pack sags below 20V under load - size its power stage for the real computer load. 3V3 from an LDO off 5V.", 1030],
-    ["20V rail values follow the LM5175 datasheet's 4.5A example. Check the FETs, inductor and sense resistor against the actual computer draw before ordering.", 1060],
+    ["20V rail values follow the LM5175 datasheet's 4.5A example, but its breaker is 10A. Size the power stage - FETs, inductor, sense resistor - for the current that breaker will let through before ordering, or the converter dies before the fuse opens.", 1060],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 

@@ -6,6 +6,7 @@
 // run in a scratch cwd with tools off so it never touches the filesystem.
 
 import { mkdtempSync } from "node:fs";
+import { LAYOUT_RULES } from "@loon/shared/layout-rules";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Schematic } from "@loon/shared/schematic";
@@ -179,6 +180,8 @@ OUTPUT CONTRACT: respond with ONLY a single JSON object, no prose, no markdown f
 WHICH BOARD YOU ARE EDITING: ops, files and actions all apply to one board. By default that is the board the user has open. To work on a different board in the project - including one you create in this same reply with create_board - set "board" to its name ("" means the main board). Everything in the reply then lands on that board, and the user is switched to it. Never design a second board onto the sheet of the first: if you meant the pendant, say so in "board", or its parts end up mixed into the board the user was looking at.
 
 ${OP_SPEC}
+
+${LAYOUT_RULES}
 
 AVAILABLE MODULES (parametric sub-circuits; prefer these for common blocks):
 ${modulesContext()}

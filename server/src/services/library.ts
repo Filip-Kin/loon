@@ -267,7 +267,7 @@ const NMOS = `(symbol "Device:Q_NMOS_GSD"
     ${pin("passive", 2.54, -5.08, 90, 2.54, "S", "2")}
     ${pin("passive", 2.54, 5.08, 270, 2.54, "D", "3")}))`;
 
-const GENERATED: string[] = [conn1x(3), conn1x(4), conn1x(5), conn1x(6), conn1x(8), conn1x(15), conn2x20(), NMOS];
+const GENERATED: string[] = [conn1x(1), conn1x(2), conn1x(3), conn1x(4), conn1x(5), conn1x(6), conn1x(8), conn1x(15), conn2x20(), NMOS];
 
 // Seed sourcing data. `available` toggles per source drive the source filter.
 type Seed = { digikey?: boolean; mouser?: boolean; oshpark?: boolean; footprints?: string[]; priceUsd?: number };

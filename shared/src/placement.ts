@@ -1,12 +1,19 @@
 // #region Placement
-// A grid of footprints is not a layout. A power distribution board has a shape
-// dictated by how it is wired into a robot: lugs at one end, screw terminals
-// along the outside edges where wire can reach them, each channel's breaker and
-// switch inline behind its own terminal, converters in the middle, and the
-// logic kept away from the switching nodes.
+// A grid of footprints is not a layout, and neither is a packer. This places a
+// board the way the layout guides do, and the order matters:
 //
-// Placement is derived from each part's role and from the netlist, so a channel
-// stays together because it is actually connected, not because of its name.
+//   1. Parts that form a circuit are placed as one cluster, chip first, its
+//      decoupling within a couple of mm of the pin it serves. A bypass cap
+//      70mm from its chip is decoration.
+//   2. Clusters go into zones - power, digital, RF, connectors - because a
+//      switching node next to a microcontroller is how you get a board that
+//      only works on the bench.
+//   3. Connectors sit on the board edge where wire can reach them, with each
+//      channel's breaker and switch inline behind its own terminal.
+//   4. Everything lands on one grid, and repeated circuits repeat exactly.
+//
+// The last point is the aesthetic one, and it is not decoration either: a board
+// that reads as columns and rows is a board you can probe, rework and explain.
 
 import type { Point } from "./schematic";
 import type { Footprint } from "./footprint";
@@ -23,19 +30,26 @@ export type Role =
   | "rf"
   | "logic"
   | "usb"
+  | "button"
   | "passive"
   | "other";
 
-const EDGE = 9; // mm from the board edge to a part's centre line
-const GAP = 3; // mm between neighbours
-// KiCad checks courtyards, which stand off from the pads. Placing to the pad
-// bounding box alone produces a board full of courtyard overlaps.
-const COURTYARD = 1.2; // mm of extra room around every part
+// #region constants
+const GRID = 0.5; // every part lands on this, so the board reads as a grid
+const EDGE = 8; // mm of margin around the content, room for mounting hardware
+const HOLE_INSET = 4; // mm from the board edge to a mounting hole centre
+const CLUSTER_GAP = 0.6; // mm between parts inside one cluster: keep it tight
+const ZONE_GAP = 8; // mm between zones, the gutter that keeps power off logic
+const COL_GAP = 2.5; // mm between two channel columns
+const LUG_GAP = 14; // mm between two studs: a ring terminal and a spanner need it
+const CRT = 0.3; // courtyards already stand off; this is the hair on top
+
+const snap = (v: number) => Math.round(v / GRID) * GRID;
 
 export function roleOf(f: PlacedFootprint, fp?: Footprint): Role {
   const v = `${f.value} ${f.libId}`.toLowerCase();
   const ref = f.ref.toUpperCase();
-  if (/lug|awg|stud|busbar/.test(v) && /6awg|4awg|lug/.test(v)) return "lug";
+  if (/lug|stud|busbar/.test(v) || /mountinghole.*pad/.test(v)) return "lug";
   if (ref.startsWith("F") || /fuse|ato|breaker/.test(v)) return "fuse";
   if (/tps27s|high.?side|power_switch/.test(v)) return "switch";
   if (/usb/.test(v)) return "usb";
@@ -43,32 +57,44 @@ export function roleOf(f: PlacedFootprint, fp?: Footprint): Role {
   if (/nrf24|rfm|lora|radio|antenna/.test(v)) return "rf";
   if (/regulator|tps54|lm5175|ap2112|ldo|buck/.test(v)) return "converter";
   if (/logic_|74lvc|flipflop|latch/.test(v)) return "logic";
+  if (/sw_|button|switch_smd|b3u/.test(v)) return "button";
   if (ref.startsWith("J") || /conn_|terminal|screw|receptacle|rj45/.test(v)) return "terminal";
   if (/^[RCLDQY]/.test(ref)) return "passive";
   void fp;
   return "other";
 }
 
+// How much room a part needs, as KiCad measures it.
 function sizeOf(fp?: Footprint, rotation = 0): { w: number; h: number } {
   if (!fp) return { w: 5, h: 5 };
-  // The courtyard is what DRC checks; fall back to the pads when a footprint
-  // does not declare one.
+  // Some footprints draw a courtyard smaller than their own pads - a lug pad
+  // on a mounting hole, for one. Take whichever is bigger, or two lugs end up
+  // on top of each other.
   const box = fp.courtyard ?? fp.bbox;
-  const w = Math.max(2, box.max.x - box.min.x);
-  const h = Math.max(2, box.max.y - box.min.y);
-  // A part turned on its side is as tall as it is wide. Measuring it unrotated
-  // is how a row ends up overlapping the row below it.
-  const turned = Math.abs(((rotation % 180) + 180) % 180 - 90) < 1;
+  const w = Math.max(1, box.max.x - box.min.x, fp.bbox.max.x - fp.bbox.min.x);
+  const h = Math.max(1, box.max.y - box.min.y, fp.bbox.max.y - fp.bbox.min.y);
+  const turned = Math.abs((((rotation % 180) + 180) % 180) - 90) < 1;
   return turned ? { w: h, h: w } : { w, h };
 }
 
-// Parts that share a net, ranked by how much they share. Used to keep a
-// channel's breaker with its terminal and a decoupling cap with its chip.
+// A courtyard is not centred on the part origin - a screw terminal's body sits
+// to one side - so every placement below positions the courtyard centre and
+// this converts back to an origin.
+function centreOffset(fp: Footprint | undefined, rotation: number): Point {
+  const box = fp?.courtyard ?? fp?.bbox;
+  if (!box) return { x: 0, y: 0 };
+  const cx = (box.min.x + box.max.x) / 2;
+  const cy = (box.min.y + box.max.y) / 2;
+  const rad = (-rotation * Math.PI) / 180;
+  return { x: cx * Math.cos(rad) - cy * Math.sin(rad), y: cx * Math.sin(rad) + cy * Math.cos(rad) };
+}
+
+// Parts that share a net, ranked by how much they share. A rail touches
+// everything, so it says nothing about who belongs with whom.
 function neighbours(ref: string, nl: Netlist): Map<string, number> {
   const out = new Map<string, number>();
   for (const net of nl.nets) {
     if (!net.pins.some((p) => p.ref === ref)) continue;
-    // A rail touches everything, so it says nothing about who belongs together.
     if (net.isPower || net.pins.length > 12) continue;
     for (const p of net.pins) {
       if (p.ref === ref) continue;
@@ -83,231 +109,490 @@ export interface PlacementResult {
   notes: string[];
 }
 
+// #region clusters
+interface Cluster {
+  id: string;
+  head: PlacedFootprint;
+  kind: Role;
+  parts: PlacedFootprint[];
+  // Offsets from the cluster's own centre, filled by layoutCluster.
+  layout: Map<string, { dx: number; dy: number; rot: number }>;
+  w: number;
+  h: number;
+}
+
+const HEAD_RANK: Role[] = ["mcu", "converter", "rf", "logic", "switch", "usb", "terminal", "fuse", "button", "other", "passive", "lug"];
+
 export function autoPlace(board: Board, footprints: Record<string, Footprint>, nl: Netlist): PlacementResult {
   const notes: string[] = [];
   const byRef = new Map(board.footprints.map((f) => [f.ref, f]));
   const fpOf = (f: PlacedFootprint) => footprints[f.libId];
   const roles = new Map<string, Role>();
   for (const f of board.footprints) roles.set(f.ref, roleOf(f, fpOf(f)));
+  const roleOfRef = (ref: string) => roles.get(ref) ?? "other";
+  const of = (role: Role) => board.footprints.filter((f) => roleOfRef(f.ref) === role);
 
-  const of = (role: Role) => board.footprints.filter((f) => roles.get(f.ref) === role);
+  const place = (f: PlacedFootprint, centre: Point, rotation = 0) => {
+    const off = centreOffset(fpOf(f), rotation);
+    f.rotation = rotation;
+    f.at = { x: snap(centre.x - off.x), y: snap(centre.y - off.y) };
+  };
+
+  // Group by the module block each part came from. A block is a circuit the
+  // designer named, which beats anything inferred from the netlist.
+  const clusters: Cluster[] = [];
+  const inCluster = new Set<string>();
+  const groups = new Map<string, PlacedFootprint[]>();
+  for (const f of board.footprints) {
+    if (!f.blockId) continue;
+    const arr = groups.get(f.blockId) ?? [];
+    arr.push(f);
+    groups.set(f.blockId, arr);
+  }
+  const newCluster = (id: string, parts: PlacedFootprint[]): Cluster => {
+    const head = [...parts].sort((a, b) => HEAD_RANK.indexOf(roleOfRef(a.ref)) - HEAD_RANK.indexOf(roleOfRef(b.ref)))[0];
+    for (const p of parts) inCluster.add(p.ref);
+    return { id, head, kind: roleOfRef(head.ref), parts, layout: new Map(), w: 0, h: 0 };
+  };
+  for (const [id, parts] of groups) clusters.push(newCluster(id, parts));
+
+  // Loose parts: a passive joins the cluster it is most connected to, anything
+  // else becomes its own cluster.
+  for (const f of board.footprints) {
+    if (inCluster.has(f.ref)) continue;
+    if (roleOfRef(f.ref) === "passive") {
+      const near = [...neighbours(f.ref, nl)].sort((a, b) => b[1] - a[1]);
+      const host = near.map(([ref]) => clusters.find((c) => c.parts.some((p) => p.ref === ref))).find(Boolean);
+      if (host) {
+        host.parts.push(f);
+        inCluster.add(f.ref);
+        continue;
+      }
+    }
+    clusters.push(newCluster(f.ref, [f]));
+  }
+
+  // #region cluster layout
+  // Inside a cluster: the chip in the middle, its parts in columns either side,
+  // closest first. Two clusters with the same parts come out identical, which
+  // is what makes eight channels look like eight channels.
+  const layoutCluster = (c: Cluster) => {
+    const headSize = sizeOf(fpOf(c.head));
+    c.layout.set(c.head.ref, { dx: 0, dy: 0, rot: 0 });
+    const near = neighbours(c.head.ref, nl);
+    const rest = c.parts
+      .filter((p) => p.ref !== c.head.ref)
+      .sort(
+        (a, b) =>
+          (near.get(b.ref) ?? 0) - (near.get(a.ref) ?? 0) ||
+          a.libId.localeCompare(b.libId) ||
+          a.value.localeCompare(b.value) ||
+          a.ref.localeCompare(b.ref),
+      );
+    // Columns stack to roughly the height that keeps the cluster square. Using
+    // the head's height alone turns eighteen 0603s into a 48mm line, which is
+    // the row problem again, one level down.
+    const restArea = rest.reduce((sum, p) => {
+      const s = sizeOf(fpOf(p));
+      return sum + (s.w + CLUSTER_GAP) * (s.h + CLUSTER_GAP);
+    }, 0);
+    const target = Math.max(headSize.h, Math.sqrt(restArea) * 1.1, 4);
+    const cols: PlacedFootprint[][] = [];
+    let col: PlacedFootprint[] = [];
+    let colH = 0;
+    for (const p of rest) {
+      const h = sizeOf(fpOf(p)).h + CLUSTER_GAP;
+      if (col.length && colH + h > target) {
+        cols.push(col);
+        col = [];
+        colH = 0;
+      }
+      col.push(p);
+      colH += h;
+    }
+    if (col.length) cols.push(col);
+
+    // Nearest column to the left, next to the right, then further out. The
+    // first column holds the parts with the strongest connection to the chip,
+    // which is where the decoupling ends up.
+    let leftX = -headSize.w / 2;
+    let rightX = headSize.w / 2;
+    cols.forEach((column, i) => {
+      const colW = Math.max(...column.map((p) => sizeOf(fpOf(p)).w));
+      const colHeight = column.reduce((s, p) => s + sizeOf(fpOf(p)).h + CLUSTER_GAP, -CLUSTER_GAP);
+      const left = i % 2 === 0;
+      const cx = left ? leftX - CLUSTER_GAP - colW / 2 : rightX + CLUSTER_GAP + colW / 2;
+      if (left) leftX = cx - colW / 2;
+      else rightX = cx + colW / 2;
+      let y = -colHeight / 2;
+      for (const p of column) {
+        const s = sizeOf(fpOf(p));
+        c.layout.set(p.ref, { dx: snap(cx), dy: snap(y + s.h / 2), rot: 0 });
+        y += s.h + CLUSTER_GAP;
+      }
+    });
+
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const p of c.parts) {
+      const l = c.layout.get(p.ref)!;
+      const s = sizeOf(fpOf(p), l.rot);
+      x1 = Math.min(x1, l.dx - s.w / 2);
+      x2 = Math.max(x2, l.dx + s.w / 2);
+      y1 = Math.min(y1, l.dy - s.h / 2);
+      y2 = Math.max(y2, l.dy + s.h / 2);
+    }
+    // Re-centre so the cluster's own centre is the middle of its bounding box.
+    const ox = (x1 + x2) / 2;
+    const oy = (y1 + y2) / 2;
+    for (const [ref, l] of c.layout) c.layout.set(ref, { ...l, dx: l.dx - ox, dy: l.dy - oy });
+    c.w = x2 - x1 + CRT * 2;
+    c.h = y2 - y1 + CRT * 2;
+  };
+  for (const c of clusters) layoutCluster(c);
+
+  const dropCluster = (c: Cluster, centre: Point) => {
+    for (const p of c.parts) {
+      const l = c.layout.get(p.ref)!;
+      place(p, { x: centre.x + l.dx, y: centre.y + l.dy }, l.rot);
+    }
+  };
+
+  // #region channels
+  // A channel is a terminal with the breaker and switch that feed it. Current
+  // goes breaker -> switch -> terminal, so finding the breaker from the
+  // terminal takes two hops.
+  interface Column { terminal: PlacedFootprint; fuse?: PlacedFootprint; sw?: Cluster; w: number; h: number }
   const lugs = of("lug");
+  const terminals = of("terminal").filter((t) => !lugs.includes(t) && !/usb/i.test(t.libId));
   const fuses = of("fuse");
-  const switches = of("switch");
-  const converters = of("converter");
-  const terminals = of("terminal").filter((t) => !lugs.includes(t));
-
-  // A channel is a terminal with the breaker and switch that feed it. Grouping
-  // by connectivity rather than by reference number keeps a renamed channel
-  // together.
-  interface Channel { terminal: PlacedFootprint; fuse?: PlacedFootprint; sw?: PlacedFootprint }
-  const channels: Channel[] = [];
+  const switchClusters = clusters.filter((c) => c.kind === "switch");
   const usedFuse = new Set<string>();
   const usedSw = new Set<string>();
+  const allColumns: Column[] = [];
   for (const t of terminals) {
-    // A terminal is not wired to its breaker directly - the current goes
-    // breaker, switch, terminal - so following one hop finds nothing. Walk two.
     const near = neighbours(t.ref, nl);
-    const pick = (cands: PlacedFootprint[], used: Set<string>, from: Map<string, number>) =>
-      cands
-        .filter((c) => !used.has(c.ref) && (from.get(c.ref) ?? 0) > 0)
-        .sort((a, b) => (from.get(b.ref) ?? 0) - (from.get(a.ref) ?? 0))[0];
-
-    const sw = pick(switches, usedSw, near);
-    if (sw) usedSw.add(sw.ref);
-    const swNear = sw ? neighbours(sw.ref, nl) : new Map<string, number>();
-    // The breaker is next to the switch on a switched channel, and next to the
-    // terminal itself on an always-on one.
-    const fuse = pick(fuses, usedFuse, swNear) ?? pick(fuses, usedFuse, near);
+    const sw = switchClusters
+      .filter((c) => !usedSw.has(c.id) && (near.get(c.head.ref) ?? 0) > 0)
+      .sort((a, b) => (near.get(b.head.ref) ?? 0) - (near.get(a.head.ref) ?? 0))[0];
+    if (sw) usedSw.add(sw.id);
+    const swNear = sw ? neighbours(sw.head.ref, nl) : new Map<string, number>();
+    const pickFuse = (from: Map<string, number>) =>
+      fuses.filter((f) => !usedFuse.has(f.ref) && (from.get(f.ref) ?? 0) > 0).sort((a, b) => (from.get(b.ref) ?? 0) - (from.get(a.ref) ?? 0))[0];
+    const fuse = pickFuse(swNear) ?? pickFuse(near);
     if (fuse) usedFuse.add(fuse.ref);
-    channels.push({ terminal: t, fuse, sw });
+    const tw = sizeOf(fpOf(t)).w;
+    const col: Column = {
+      terminal: t,
+      fuse,
+      sw,
+      w: Math.max(tw, fuse ? sizeOf(fpOf(fuse), 90).w : 0, sw?.w ?? 0),
+      h:
+        sizeOf(fpOf(t)).h +
+        (fuse ? sizeOf(fpOf(fuse), 90).h + CLUSTER_GAP * 2 : 0) +
+        (sw ? sw.h + CLUSTER_GAP * 2 : 0),
+    };
+    // A switched channel is a column of its own. A plain rail output is just a
+    // terminal and its fuse, and those go on the opposite edge together.
+    // A terminal with no breaker behind it is a signal connector, not an
+    // output, and it does not belong on the output edge.
+    if (fuse) allColumns.push(col);
+    else continue;
   }
 
-  // The board should come out wider than it is tall, so the screw terminals run
-  // along the long sides where a loom can reach them. Width is whichever is
-  // larger: the room the channels need, or the room everything else needs laid
-  // out about twice as wide as it is deep.
-  const perEdge = Math.max(1, Math.ceil(channels.length / 2));
-  const termPitch = Math.max(
-    12,
-    ...channels.map((c) => sizeOf(fpOf(c.terminal)).w + GAP * 2),
-  );
-  const lugWidth = lugs.length ? Math.max(...lugs.map((l) => sizeOf(fpOf(l)).w)) + EDGE * 2 : 0;
-  let loose = 0;
-  for (const f of board.footprints) {
-    const sz = sizeOf(fpOf(f));
-    loose += (sz.w + GAP) * (sz.h + GAP);
+  // Outputs of the same kind belong together: the biggest family of connectors
+  // is the channel bank and takes one long edge, the rest take the other. That
+  // is what turns "6 on one side, 5 on the other" into two banks that read.
+  const byFamily = new Map<string, Column[]>();
+  for (const c of allColumns) {
+    const arr = byFamily.get(c.terminal.libId) ?? [];
+    arr.push(c);
+    byFamily.set(c.terminal.libId, arr);
   }
-  const byArea = Math.sqrt(loose * 2.2 * 4); // area x packing factor, at 4:1
-  const width = Math.max(120, lugWidth + perEdge * termPitch + EDGE * 2, byArea);
-  const height = Math.max(70, 60 + converters.length * 6);
+  const families = [...byFamily.values()].sort((a, b) => b.length - a.length);
+  const columns = families[0] ?? [];
+  const railColumns = families.slice(1).flat();
 
-  // A part's courtyard is not centred on its origin - a screw terminal's body
-  // sits to one side - so placing the origin at a target leaves the courtyard
-  // somewhere else, which is how a row ends up on top of the row above it.
-  // Every placement below positions the courtyard's centre.
-  const centreOffset = (fp: Footprint | undefined, rotation: number): Point => {
-    const box = fp?.courtyard ?? fp?.bbox;
-    if (!box) return { x: 0, y: 0 };
-    const cx = (box.min.x + box.max.x) / 2;
-    const cy = (box.min.y + box.max.y) / 2;
-    const rad = (-rotation * Math.PI) / 180;
-    return { x: cx * Math.cos(rad) - cy * Math.sin(rad), y: cx * Math.sin(rad) + cy * Math.cos(rad) };
-  };
-
-  const placed = new Set<string>();
-  // Parts whose position is the point of the layout: a terminal belongs on the
-  // edge, so the overlap pass moves everything else around it instead.
-  const pinned = new Set<string>();
-  const place = (f: PlacedFootprint | undefined, at: Point, rotation = 0, fix = false) => {
-    if (!f) return;
-    const off = centreOffset(fpOf(f), rotation);
-    f.at = { x: +(at.x - off.x).toFixed(2), y: +(at.y - off.y).toFixed(2) };
-    f.rotation = rotation;
-    placed.add(f.ref);
-    if (fix) pinned.add(f.ref);
-  };
-
-  // Lugs at one end, on the centre line, where heavy cable comes in.
-  lugs.forEach((l, i) => {
-    const h = sizeOf(fpOf(l)).h;
-    place(l, { x: EDGE + sizeOf(fpOf(l)).w / 2, y: height / 2 + (i - (lugs.length - 1) / 2) * (h + GAP) }, 0, true);
-  });
-
-  // Parts placed against the bottom edge keep their distance from it, because
-  // the board grows taller once everything else lands.
-  const fromBottom = new Map<string, number>();
-
-  // Channels line the top and bottom edges: terminal outermost so wire lands on
-  // the outside, then its breaker, then its switch, marching inward.
-  const startX = EDGE + lugWidth + termPitch / 2;
-  channels.forEach((c, i) => {
-    // Alternate sides rather than filling one edge then the other, so channel
-    // n and channel n+1 sit opposite each other instead of a board apart.
-    const top = i % 2 === 0;
-    const idx = Math.floor(i / 2);
-    const x = startX + idx * termPitch;
-    const termH = sizeOf(fpOf(c.terminal)).h;
-    const fuseH = c.fuse ? sizeOf(fpOf(c.fuse), 90).h : 0;
-    const swH = c.sw ? sizeOf(fpOf(c.sw)).h : 0;
-    if (top) {
-      let y = EDGE + termH / 2;
-      place(c.terminal, { x, y }, 0, true);
-      y += termH / 2 + GAP + fuseH / 2;
-      place(c.fuse, { x, y }, 90, true);
-      y += fuseH / 2 + GAP + swH / 2;
-      place(c.sw, { x, y }, 0, true);
-    } else {
-      let d = EDGE + termH / 2;
-      place(c.terminal, { x, y: height - d }, 180, true);
-      fromBottom.set(c.terminal.ref, d);
-      d += termH / 2 + GAP + fuseH / 2;
-      if (c.fuse) { place(c.fuse, { x, y: height - d }, 90, true); fromBottom.set(c.fuse.ref, d); }
-      d += fuseH / 2 + GAP + swH / 2;
-      if (c.sw) { place(c.sw, { x, y: height - d }, 180, true); fromBottom.set(c.sw.ref, d); }
-    }
-  });
-
-  // Everything that is not on an edge flows through the middle in groups: a
-  // converter or a chip followed immediately by its own passives, laid out row
-  // by row. Nudging overlapping parts apart pairwise oscillates on a board this
-  // size; flowing them into rows cannot overlap at all.
-  // Start below whatever the top channel row actually occupies, and to the
-  // right of the lug column, so the flow cannot run into a pinned part. The
-  // board grows downward if the flow needs the room, and the bottom row is
-  // re-seated against the final edge afterwards.
-  let topUsed = EDGE;
-  for (const f of board.footprints) {
-    if (!pinned.has(f.ref) || fromBottom.has(f.ref)) continue;
-    if (lugs.includes(f)) continue;
-    topUsed = Math.max(topUsed, f.at.y + sizeOf(fpOf(f), f.rotation).h / 2);
+  const edgeRefs = new Set<string>();
+  const railRefs = new Set<string>();
+  for (const c of railColumns) {
+    railRefs.add(c.terminal.ref);
+    if (c.fuse) railRefs.add(c.fuse.ref);
   }
-  const flowLeft = EDGE + lugWidth + GAP * 2;
-  const midTop = topUsed + GAP * 3;
-  const taken = new Set<string>(placed);
-  const groups: PlacedFootprint[][] = [];
-  const groupFor = (head: PlacedFootprint) => {
-    const group = [head];
-    taken.add(head.ref);
-    for (const [ref] of [...neighbours(head.ref, nl)].sort((a, b) => b[1] - a[1])) {
-      const part = byRef.get(ref);
-      if (!part || taken.has(ref) || roles.get(ref) !== "passive") continue;
-      group.push(part);
-      taken.add(ref);
-      if (group.length > 18) break;
-    }
-    return group;
-  };
-  for (const role of ["converter", "mcu", "rf", "logic", "usb"] as Role[]) {
-    for (const head of of(role)) {
-      if (taken.has(head.ref)) continue;
-      groups.push(groupFor(head));
+  const columnClusterIds = new Set<string>();
+  for (const c of allColumns) {
+    edgeRefs.add(c.terminal.ref);
+    if (c.fuse) edgeRefs.add(c.fuse.ref);
+    if (c.sw) {
+      columnClusterIds.add(c.sw.id);
+      for (const p of c.sw.parts) edgeRefs.add(p.ref);
     }
   }
-  for (const f of board.footprints) {
-    if (taken.has(f.ref)) continue;
-    groups.push(groupFor(f));
+
+  // A terminal or breaker that went to an edge leaves its cluster. Whatever is
+  // left of that cluster still has to be placed - dropping it is how parts end
+  // up sitting wherever they were first put.
+  for (const c of clusters) {
+    if (columnClusterIds.has(c.id)) continue;
+    const keep = c.parts.filter((p) => !edgeRefs.has(p.ref));
+    if (keep.length === c.parts.length) continue;
+    c.parts = keep;
+    if (!keep.length) continue;
+    if (edgeRefs.has(c.head.ref)) {
+      c.head = [...keep].sort((a, b) => HEAD_RANK.indexOf(roleOfRef(a.ref)) - HEAD_RANK.indexOf(roleOfRef(b.ref)))[0];
+      c.kind = roleOfRef(c.head.ref);
+    }
+    c.layout.clear();
+    layoutCluster(c);
   }
 
-  let cx = flowLeft;
-  let cy = midTop;
-  let rowH = 0;
-  const lineWidth = width - EDGE;
-  for (const group of groups) {
-    // Keep a group on one row where it fits, so a chip and its decoupling stay
-    // together instead of being split across the board.
-    const groupW = group.reduce((sum, f) => sum + sizeOf(fpOf(f)).w + GAP, 0);
-    if (cx > flowLeft && cx + Math.min(groupW, lineWidth / 2) > lineWidth) {
-      cx = flowLeft;
-      cy += rowH + GAP * 2;
-      rowH = 0;
-    }
-    for (const f of group) {
-      const sz = sizeOf(fpOf(f));
-      if (cx + sz.w > lineWidth) {
-        cx = flowLeft;
-        cy += rowH + GAP * 2;
-        rowH = 0;
+  // #region zones
+  // What is left over, split into the two zones that must not mix.
+  const middle = clusters.filter((c) => !columnClusterIds.has(c.id) && c.parts.length > 0 && c.kind !== "lug");
+  const powerZone = middle.filter((c) => c.kind === "converter");
+  // A connector you plug something into belongs on an edge, even when it is a
+  // signal connector: an e-stop header in the middle of the board is a header
+  // you cannot reach.
+  const edgeConnectors = middle.filter((c) => c.kind === "terminal" || c.kind === "usb");
+  const digitalZone = middle.filter((c) => !edgeConnectors.includes(c) && ["mcu", "logic", "button", "rf"].includes(c.kind));
+  const otherZone = middle.filter((c) => !powerZone.includes(c) && !digitalZone.includes(c) && !edgeConnectors.includes(c));
+
+  const rowsOf = (list: Cluster[], maxW: number) => {
+    const rows: Cluster[][] = [];
+    let row: Cluster[] = [];
+    let w = 0;
+    for (const c of list) {
+      if (row.length && w + c.w + ZONE_GAP / 2 > maxW) {
+        rows.push(row);
+        row = [];
+        w = 0;
       }
-      place(f, { x: cx + sz.w / 2, y: cy + sz.h / 2 });
-      cx += sz.w + GAP + COURTYARD;
-      rowH = Math.max(rowH, sz.h + COURTYARD);
+      row.push(c);
+      w += c.w + ZONE_GAP / 2;
     }
-    cx += GAP * 2;
+    if (row.length) rows.push(row);
+    return rows;
+  };
+  const sizeRows = (rows: Cluster[][]) => ({
+    w: Math.max(0, ...rows.map((r) => r.reduce((s, c) => s + c.w + ZONE_GAP / 2, -ZONE_GAP / 2))),
+    h: rows.reduce((s, r) => s + Math.max(...r.map((c) => c.h)) + ZONE_GAP / 2, -ZONE_GAP / 2),
+  });
+
+  // Width: the channel bank sets it, unless the middle zones need more. The
+  // lugs take a column of their own at the input end.
+  const lugW = lugs.length ? Math.max(...lugs.map((l) => sizeOf(fpOf(l)).w)) : 0;
+  const lugZoneW = lugs.length ? lugW + ZONE_GAP : 0;
+  const colPitch = columns.length ? Math.max(...columns.map((c) => c.w)) + COL_GAP : 0;
+  const railPitch = railColumns.length ? Math.max(...railColumns.map((c) => c.w)) + COL_GAP : 0;
+  const bankW = columns.length * colPitch;
+  const railBankW = railColumns.length * railPitch;
+
+  // Power and digital sit side by side in the middle band, separated by a
+  // gutter. Each gets roughly the width it needs.
+  const powerW = powerZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
+  const digitalW = digitalZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
+  const otherW = otherZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
+  // A small board is allowed to be small. Inflating the width to a fixed floor
+  // is how a pendant with 37 parts came out 158mm wide.
+  // Side by side normally. With no channel bank to set the width, two wide
+  // zones sharing a row make a board that is all width and no height, so they
+  // stack instead.
+  const stacked = !allColumns.length && powerW > 0 && digitalW > 0 && powerW + digitalW > 80;
+  const midW = (stacked ? Math.max(powerW, digitalW) : powerW + (powerW && digitalW ? ZONE_GAP : 0) + digitalW) + (otherW ? ZONE_GAP + otherW / 2 : 0);
+  const contentW = Math.max(bankW, railBankW + lugZoneW, midW * 0.8, 40);
+
+  const powerRows = rowsOf(powerZone, Math.max(contentW * 0.5, 35));
+  const digitalRows = rowsOf(digitalZone, Math.max(contentW * 0.45, 35));
+  const otherRows = rowsOf(otherZone, contentW);
+  const powerSize = sizeRows(powerRows);
+  const digitalSize = sizeRows(digitalRows);
+  const otherSize = sizeRows(otherRows);
+
+  const topDepth = columns.length ? Math.max(...columns.map((c) => c.h)) : 0;
+  const bottomDepth = railColumns.length ? Math.max(...railColumns.map((c) => c.h)) : 0;
+  const midDepth = Math.max(powerSize.h, digitalSize.h) + (otherRows.length ? otherSize.h + ZONE_GAP : 0);
+  const contentH = topDepth + ZONE_GAP + midDepth + (bottomDepth ? ZONE_GAP + bottomDepth : 0);
+
+  const W = snap(contentW + EDGE * 2);
+  const H = snap(contentH + EDGE * 2);
+
+  // #region compose
+  // Top edge: the channel bank. Terminal flush to the edge, then its breaker,
+  // then its switch, marching inward - the order current travels.
+  const bankX = EDGE + (columns.length ? (contentW - bankW) / 2 : 0);
+  columns.forEach((c, i) => {
+    const x = bankX + i * colPitch + colPitch / 2;
+    let y = EDGE;
+    const th = sizeOf(fpOf(c.terminal)).h;
+    place(c.terminal, { x, y: y + th / 2 }, 0);
+    y += th + CLUSTER_GAP * 2;
+    if (c.fuse) {
+      const fh = sizeOf(fpOf(c.fuse), 90).h;
+      place(c.fuse, { x, y: y + fh / 2 }, 90);
+      y += fh + CLUSTER_GAP * 2;
+    }
+    if (c.sw) dropCluster(c.sw, { x, y: y + c.sw.h / 2 });
+  });
+
+  // Lugs at the input end, stacked on the left edge: heavy cable lands where it
+  // enters the board, not somewhere in the middle of it.
+  const lugTop = EDGE + topDepth + ZONE_GAP;
+  const lugPitch = Math.max(...lugs.map((l) => sizeOf(fpOf(l)).h), 6) + LUG_GAP;
+  lugs.forEach((l, i) => {
+    place(l, { x: EDGE + lugW / 2, y: lugTop + sizeOf(fpOf(l)).h / 2 + i * lugPitch });
+  });
+  const lugBottom = lugs.length ? lugTop + (lugs.length - 1) * lugPitch + Math.max(...lugs.map((l) => sizeOf(fpOf(l)).h)) : lugTop;
+
+  // The middle band: power on the left, logic on the right, a gutter between
+  // them. Switchers and a microcontroller do not share a neighbourhood.
+  const midTop = EDGE + topDepth + ZONE_GAP;
+  const dropRows = (rows: Cluster[][], left: number, top: number, width: number) => {
+    let y = top;
+    for (const row of rows) {
+      const rowH = Math.max(...row.map((c) => c.h));
+      const rowW = row.reduce((s, c) => s + c.w + ZONE_GAP / 2, -ZONE_GAP / 2);
+      let x = left + Math.max(0, (width - rowW) / 2);
+      for (const c of row) {
+        dropCluster(c, { x: x + c.w / 2, y: y + rowH / 2 });
+        x += c.w + ZONE_GAP / 2;
+      }
+      y += rowH + ZONE_GAP / 2;
+    }
+    return y;
+  };
+  const connW = edgeConnectors.length ? Math.max(...edgeConnectors.map((c) => c.w)) : 0;
+  const leftZoneW = Math.max(lugZoneW, connW ? connW + ZONE_GAP : 0);
+  const powerLeft = EDGE + leftZoneW;
+  const powerWidth = powerSize.w;
+  const digitalLeft = stacked || !powerWidth ? powerLeft : powerLeft + powerWidth + ZONE_GAP;
+  const powerBottom = dropRows(powerRows, powerLeft, midTop, powerWidth);
+  const digitalBottom = dropRows(digitalRows, digitalLeft, stacked ? powerBottom + ZONE_GAP : midTop, digitalSize.w);
+  dropRows(otherRows, EDGE + leftZoneW, Math.max(powerBottom, digitalBottom) + ZONE_GAP / 2, contentW - leftZoneW);
+
+  // #region antenna
+  // An RF module's antenna has to look off the board, not into a ground plane.
+  // The footprint says where its antenna is by way of its keepout zone.
+  const rfHeads = clusters.filter((c) => c.kind === "mcu" || c.kind === "rf").map((c) => c.head);
+  for (const head of rfHeads) {
+    const fp = fpOf(head);
+    if (!fp?.keepouts?.length) continue;
+    const pts = fp.keepouts.flat();
+    const kx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const ky = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const cluster = clusters.find((c) => c.head.ref === head.ref)!;
+    // Point the antenna at the nearest board edge, and pull the cluster over so
+    // the module sits on it.
+    const size = sizeOf(fp);
+    const centre = { x: head.at.x, y: head.at.y };
+    const gaps = [
+      { rot: 180, d: centre.x - EDGE, at: { x: EDGE + cluster.w / 2, y: centre.y } }, // antenna to -x
+      { rot: 0, d: W - EDGE - centre.x, at: { x: W - EDGE - cluster.w / 2, y: centre.y } },
+      { rot: 90, d: centre.y - EDGE, at: { x: centre.x, y: EDGE + cluster.h / 2 } },
+      { rot: 270, d: H - EDGE - centre.y, at: { x: centre.x, y: H - EDGE - cluster.h / 2 } },
+    ];
+    // Only a horizontal antenna is worth honouring here: the keepout sits at
+    // one end of the module, and that end is what has to face out.
+    if (Math.abs(kx) < Math.abs(ky)) continue;
+    const best = gaps.slice(0, 2).sort((a, b) => a.d - b.d)[0];
+    const layout = cluster.layout;
+    const rot = kx > 0 ? best.rot : (best.rot + 180) % 360;
+    layout.set(head.ref, { ...layout.get(head.ref)!, rot });
+    void size;
+    void ky;
+    dropCluster(cluster, best.at);
   }
 
-  // Size the board from everything except the bottom row, which follows the
-  // edge rather than setting it, then seat that row against the real edge.
-  const heightOf = (f: PlacedFootprint) => sizeOf(fpOf(f), f.rotation).h;
-  let maxY = height;
-  for (const f of board.footprints) {
-    if (fromBottom.has(f.ref)) continue;
-    maxY = Math.max(maxY, f.at.y + heightOf(f) / 2);
-  }
-  let finalH = Math.ceil(maxY + EDGE) + 2;
-  for (const [ref, d] of fromBottom) {
-    const f = byRef.get(ref);
-    if (!f) continue;
-    // Same correction as when it was first placed: d is where the courtyard's
-    // centre belongs, not where the part's origin goes.
-    const off = centreOffset(fpOf(f), f.rotation);
-    f.at = { x: f.at.x, y: +(finalH - d - off.y).toFixed(2) };
+  // The board is as wide as what is on it, not as wide as the first guess.
+  const usedRight = board.footprints.reduce((m, f) => {
+    const s2 = sizeOf(fpOf(f), f.rotation);
+    return Math.max(m, f.at.x + s2.w / 2);
+  }, EDGE);
+  const boardW = snap(Math.max(usedRight + EDGE, EDGE * 2 + 40));
+
+  // Connectors go on the edge nearest the circuit they serve: a programming
+  // port belongs beside the microcontroller, not a board away from it. This
+  // runs after the zones are down, against where the content actually ended up
+  // rather than against the estimate it started from.
+  const contentRight = board.footprints.reduce((m, f) => {
+    if (edgeConnectors.some((c) => c.parts.includes(f))) return m;
+    return Math.max(m, f.at.x + sizeOf(fpOf(f), f.rotation).w / 2);
+  }, EDGE);
+  let leftY = lugBottom + ZONE_GAP;
+  let rightY = EDGE + topDepth + ZONE_GAP;
+  for (const c of edgeConnectors) {
+    const near = neighbours(c.head.ref, nl);
+    const friend = [...near]
+      .sort((a, b) => b[1] - a[1])
+      .map(([ref]) => byRef.get(ref))
+      .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
+    const right = !!friend && friend.at.x > EDGE + contentRight / 2;
+    if (right) {
+      dropCluster(c, { x: contentRight + ZONE_GAP + c.w / 2, y: rightY + c.h / 2 });
+      rightY += c.h + ZONE_GAP / 2;
+    } else {
+      dropCluster(c, { x: EDGE + connW / 2, y: leftY + c.h / 2 });
+      leftY += c.h + ZONE_GAP / 2;
+    }
   }
 
-  // Now nothing moves again, guarantee no two parts overlap. Anything still
-  // colliding goes to a spare area below the board: a part you have to drag is
-  // better than two parts on top of each other, and the DRC stays clean.
-  // The courtyard is not centred on the part's origin - a connector's sits off
-  // to one side - so rotate its actual corners and take the bounding box.
+  // Bottom edge: the regulated outputs, seated against the real edge rather
+  // than a guess made before the middle was laid out. Guessing leaves a 40mm
+  // band of nothing between the logic and the connectors.
+  const usedBottom = board.footprints.reduce((m, f) => {
+    if (railRefs.has(f.ref)) return m;
+    const s2 = sizeOf(fpOf(f), f.rotation);
+    return Math.max(m, f.at.y + s2.h / 2);
+  }, EDGE);
+  const realH = snap(Math.max(H, usedBottom + (bottomDepth ? ZONE_GAP + bottomDepth : 0) + EDGE));
+  const railX = EDGE + lugZoneW;
+  railColumns.forEach((c, i) => {
+    const x = railX + i * railPitch + railPitch / 2;
+    let y = realH - EDGE;
+    const th = sizeOf(fpOf(c.terminal)).h;
+    place(c.terminal, { x, y: y - th / 2 }, 180);
+    y -= th + CLUSTER_GAP * 2;
+    if (c.fuse) {
+      const fh = sizeOf(fpOf(c.fuse), 90).h;
+      place(c.fuse, { x, y: y - fh / 2 }, 90);
+    }
+  });
+
+  // #region mounting holes
+  // A board with 12AWG pulling on its terminals needs to be bolted down.
+  const holeFp = Object.keys(footprints).find((k) => /MountingHole_3\.2mm/.test(k));
+  if (holeFp) {
+    const spots: Point[] = [
+      { x: HOLE_INSET, y: HOLE_INSET },
+      { x: boardW - HOLE_INSET, y: HOLE_INSET },
+      { x: HOLE_INSET, y: realH - HOLE_INSET },
+      { x: boardW - HOLE_INSET, y: realH - HOLE_INSET },
+    ];
+    board.footprints = board.footprints.filter((f) => !/^H\d+$/.test(f.ref));
+    spots.forEach((p, i) => {
+      board.footprints.push({
+        uuid: crypto.randomUUID(),
+        ref: `H${i + 1}`,
+        value: "M3 mount",
+        libId: holeFp,
+        at: { x: snap(p.x), y: snap(p.y) },
+        rotation: 0,
+        side: "F",
+        padNets: {},
+      });
+    });
+    notes.push("4 M3 mounting holes at the corners");
+  }
+
+  // #region guard
+  // Nothing should overlap by now. If something does it is a bug, and a part
+  // parked below the board is easier to find than two parts on top of each
+  // other - but say so, loudly, in the notes.
   const rectOf = (f: PlacedFootprint) => {
     const fp = fpOf(f);
     const box = fp?.courtyard ?? fp?.bbox;
     if (!box) {
-      const sz = sizeOf(fp, f.rotation);
-      return { x1: f.at.x - sz.w / 2, y1: f.at.y - sz.h / 2, x2: f.at.x + sz.w / 2, y2: f.at.y + sz.h / 2 };
+      const s = sizeOf(fp, f.rotation);
+      return { x1: f.at.x - s.w / 2, y1: f.at.y - s.h / 2, x2: f.at.x + s.w / 2, y2: f.at.y + s.h / 2 };
     }
-    // KiCad rotates a footprint counter-clockwise, and PCB space is Y-down, so
-    // the angle is negated to land the courtyard on the side KiCad puts it.
     const rad = (-f.rotation * Math.PI) / 180;
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
@@ -322,52 +607,56 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
       xs.push(f.at.x + c.x * cos - c.y * sin);
       ys.push(f.at.y + c.x * sin + c.y * cos);
     }
-    const pad = 0.15; // a hair, so touching courtyards do not count as overlapping
+    const pad = 0.1;
     return { x1: Math.min(...xs) - pad, y1: Math.min(...ys) - pad, x2: Math.max(...xs) + pad, y2: Math.max(...ys) + pad };
   };
-  const hits = (a: ReturnType<typeof rectOf>, b: ReturnType<typeof rectOf>) =>
-    a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+  const hits = (a: ReturnType<typeof rectOf>, b: ReturnType<typeof rectOf>) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
   const accepted: ReturnType<typeof rectOf>[] = [];
+  const displaced: string[] = [];
   let spareX = EDGE;
-  let spareY = finalH + GAP * 3;
+  let spareY = realH + ZONE_GAP;
   let spareRow = 0;
-  let displaced = 0;
-  const displacedRefs: string[] = [];
-  // Edge parts are the layout; they get first claim, and the rest move.
-  const order = [...board.footprints].sort((a, b) => Number(pinned.has(b.ref)) - Number(pinned.has(a.ref)));
+  const order = [...board.footprints].sort((a, b) => Number(edgeRefs.has(b.ref)) - Number(edgeRefs.has(a.ref)));
   for (const f of order) {
     let r = rectOf(f);
     if (accepted.some((a) => hits(a, r))) {
-      const sz = sizeOf(fpOf(f), f.rotation);
-      if (spareX + sz.w > width - EDGE) {
+      const s = sizeOf(fpOf(f), f.rotation);
+      if (spareX + s.w > boardW - EDGE) {
         spareX = EDGE;
-        spareY += spareRow + GAP * 2;
+        spareY += spareRow + CLUSTER_GAP * 2;
         spareRow = 0;
       }
-      f.at = { x: +(spareX + sz.w / 2).toFixed(2), y: +(spareY + sz.h / 2).toFixed(2) };
-      spareX += sz.w + GAP + COURTYARD;
-      spareRow = Math.max(spareRow, sz.h + COURTYARD);
+      place(f, { x: spareX + s.w / 2, y: spareY + s.h / 2 }, f.rotation);
+      spareX += s.w + CLUSTER_GAP * 2;
+      spareRow = Math.max(spareRow, s.h);
       r = rectOf(f);
-      displaced++;
-      displacedRefs.push(f.ref);
+      displaced.push(f.ref);
     }
     accepted.push(r);
   }
-  if (displaced) notes.push(`${displaced} parts moved to a spare area below the board so nothing overlaps (${displacedRefs.slice(0, 8).join(", ")}${displacedRefs.length > 8 ? ", ..." : ""})`);
 
+  // #region outline
   let maxX = 0;
+  let maxY = 0;
   for (const f of board.footprints) {
-    const sz = sizeOf(fpOf(f), f.rotation);
-    maxX = Math.max(maxX, f.at.x + sz.w / 2);
-    finalH = Math.max(finalH, Math.ceil(f.at.y + sz.h / 2 + EDGE));
+    const r = rectOf(f);
+    maxX = Math.max(maxX, r.x2);
+    maxY = Math.max(maxY, r.y2);
   }
+  const outW = Math.max(boardW, snap(maxX + EDGE));
+  const outH = Math.max(realH, snap(maxY + EDGE));
   board.outline = [
     { x: 0, y: 0 },
-    { x: Math.ceil(Math.max(width, maxX + EDGE)) + 2, y: 0 },
-    { x: Math.ceil(Math.max(width, maxX + EDGE)) + 2, y: finalH },
-    { x: 0, y: finalH },
+    { x: outW, y: 0 },
+    { x: outW, y: outH },
+    { x: 0, y: outH },
   ];
 
-  notes.push(`${channels.length} channels along the edges, ${lugs.length} lug(s) at the input end, ${converters.length} converter(s) in the middle`);
+  if (displaced.length) notes.push(`overlap guard moved ${displaced.length} parts below the board: ${displaced.slice(0, 8).join(", ")}`);
+  notes.push(
+    `${columns.length} channel columns on the top edge, ${railColumns.length} rail outputs on the bottom, ` +
+      `${lugs.length} lug(s) at the input end, ${powerZone.length} converter clusters and ${digitalZone.length} logic clusters in separate zones`,
+  );
+  notes.push(`board ${outW.toFixed(0)} x ${outH.toFixed(0)} mm (${((outW * outH) / 645.16).toFixed(1)} sq in)`);
   return { board, notes };
 }

@@ -608,7 +608,12 @@ const pcbRouter = router({
         if (!fp) continue;
         specs.set(fp, defs(s.libId)?.pins.length ?? 2);
       }
-      const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+      // Placement bolts the board down, so the hole pattern has to be on hand
+      // whether or not the schematic mentions it.
+      const footprints = await getFootprints([
+        ...[...specs].map(([libId, padCount]) => ({ libId, padCount })),
+        { libId: "MountingHole:MountingHole_3.2mm_M3", padCount: 0 },
+      ]);
       const unit = input.board ?? "";
       let existing: Board | undefined;
       if (input.keepPlacement) {
