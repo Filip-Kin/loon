@@ -9,6 +9,11 @@ import { buildNetlist } from "@loon/shared/netlist";
 import { runErc } from "@loon/shared/erc";
 import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainStub } from "@loon/shared/firmware";
 import { startBuild, getBuild, listBuilds } from "../services/build";
+import { getFootprints } from "../services/footprints";
+import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
+import { serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
+import { runKicadDrc } from "../services/kicad";
+import { OSHPARK_2LAYER, OSHPARK_4LAYER, type Board } from "@loon/shared/board";
 import { emptySchematic, type Schematic, type LibSymbol } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
 import type { SxList } from "@loon/shared/sexpr";
@@ -28,6 +33,13 @@ function makeResolver(schem?: Schematic): LibResolver {
     if (def) return { def };
     return undefined;
   };
+}
+
+// Verbatim library S-expressions, keyed by footprint id, for the board writer.
+function rawOf(footprints: Record<string, { raw?: unknown }>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [id, fp] of Object.entries(footprints)) if (fp.raw) out[id] = fp.raw;
+  return out;
 }
 
 const sourceEnum = z.enum(ALL_SOURCES as [string, ...string[]]);
@@ -280,8 +292,106 @@ const firmwareRouter = router({
     .query(({ input }) => listBuilds(input.project).map((b) => ({ id: b.id, state: b.state, started: b.started }))),
 });
 
+// #region pcb
+// The .kicad_pcb is the deliverable: OSH Park accepts it directly, so there is
+// no Gerber step between the layout and the order.
+const pcbRouter = router({
+  // Footprints for everything on the sheet, fetched from KiCad's library and
+  // cached. Returned to the browser so the canvas can draw real land patterns.
+  footprints: publicProcedure
+    .input(z.object({ schem: z.any() }))
+    .query(async ({ input }) => {
+      const schem = input.schem as Schematic;
+      const specs = new Map<string, number>();
+      for (const s of schem.symbols) {
+        const fp = s.properties.Footprint;
+        if (!fp) continue;
+        const def = library.get(s.libId)?.def ?? schem.libSymbols[s.libId];
+        specs.set(fp, def?.pins.length ?? 2);
+      }
+      return getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+    }),
+
+  generate: publicProcedure
+    .input(z.object({ project: z.string(), schem: z.any(), layers: z.number().optional(), keepPlacement: z.boolean().optional() }))
+    .mutation(async ({ input }) => {
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      const specs = new Map<string, number>();
+      for (const s of schem.symbols) {
+        const fp = s.properties.Footprint;
+        if (!fp) continue;
+        specs.set(fp, defs(s.libId)?.pins.length ?? 2);
+      }
+      const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+      let existing: Board | undefined;
+      if (input.keepPlacement) {
+        try {
+          existing = JSON.parse(await storage.readFile(input.project, "board.loon.json")) as Board;
+        } catch {
+          /* first board */
+        }
+      }
+      const res = generateBoard(schem, defs, {
+        rules: input.layers === 4 ? OSHPARK_4LAYER : OSHPARK_2LAYER,
+        footprints,
+        existing,
+      });
+      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2));
+      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)));
+      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"));
+      return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate };
+    }),
+
+  load: publicProcedure
+    .input(z.object({ project: z.string() }))
+    .query(async ({ input }) => {
+      try {
+        return { board: JSON.parse(await storage.readFile(input.project, "board.loon.json")) as Board };
+      } catch {
+        return { board: null };
+      }
+    }),
+
+  save: publicProcedure
+    .input(z.object({ project: z.string(), board: z.any(), schem: z.any() }))
+    .mutation(async ({ input }) => {
+      const board = input.board as Board;
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      const specs = new Map<string, number>();
+      for (const f of board.footprints) specs.set(f.libId, 2);
+      for (const s of schem.symbols) {
+        const fp = s.properties.Footprint;
+        if (fp) specs.set(fp, defs(s.libId)?.pins.length ?? 2);
+      }
+      const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(board, null, 2));
+      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)));
+      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"));
+      const rats = ratsnest(board, footprints);
+      const drc = runDrc(board, footprints, rats.length);
+      return { ok: true, drc, unrouted: rats.length };
+    }),
+
+  // KiCad's own DRC on the saved board: slower, and the one that counts.
+  kicadDrc: publicProcedure
+    .input(z.object({ project: z.string() }))
+    .mutation(({ input }) => runKicadDrc(input.project)),
+
+  check: publicProcedure
+    .input(z.object({ board: z.any() }))
+    .query(async ({ input }) => {
+      const board = input.board as Board;
+      const footprints = await getFootprints(board.footprints.map((f) => ({ libId: f.libId, padCount: 2 })));
+      const rats = ratsnest(board, footprints);
+      return { drc: runDrc(board, footprints, rats.length), unrouted: rats.length };
+    }),
+});
+
 export const appRouter = router({
   design: designRouter,
+  pcb: pcbRouter,
   firmware: firmwareRouter,
   library: librouter,
   project: projectRouter,
