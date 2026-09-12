@@ -11,6 +11,8 @@ interface Props {
   project: string;
   schem: Schematic | null;
   flash: (text: string, err?: boolean) => void;
+  // Bumped by the assistant when it writes or builds firmware.
+  rev?: number;
 }
 
 interface FileMeta { path: string; size: number; updated: number }
@@ -18,7 +20,7 @@ interface FileMeta { path: string; size: number; updated: number }
 // The code view: files on the left, editor in the middle, and the two buttons
 // that matter - build in a container on the server, then flash over USB from
 // the browser. The pin header is generated from the schematic, never typed.
-export function CodeView({ project, schem, flash }: Props) {
+export function CodeView({ project, schem, flash, rev }: Props) {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -53,7 +55,7 @@ export function CodeView({ project, schem, flash }: Props) {
       const list = await refreshFiles();
       if (list.length === 0 && schem && schem.symbols.length > 0) await sync();
     })();
-  }, [project, schem]);
+  }, [project, schem, rev]);
 
   async function openFile(p: string) {
     try {

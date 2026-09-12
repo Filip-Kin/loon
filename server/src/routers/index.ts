@@ -44,6 +44,151 @@ function rawOf(footprints: Record<string, { raw?: unknown }>): Record<string, an
   return out;
 }
 
+
+// #region assistant actions
+// What the buttons used to do, callable from the conversation.
+async function projectState(project: string, schem: Schematic): Promise<string> {
+  const lines: string[] = [];
+  try {
+    const files = await storage.listFiles(project, "firmware");
+    lines.push(files.length ? `firmware files: ${files.map((f) => f.path).join(", ")}` : "firmware: none yet");
+    for (const f of files.filter((x) => /\.(cpp|h|ini)$/.test(x.path)).slice(0, 6)) {
+      const text = await storage.readFile(project, `firmware/${f.path}`);
+      lines.push(`--- firmware/${f.path} ---\n${text.slice(0, 4000)}`);
+    }
+  } catch {
+    lines.push("firmware: none yet");
+  }
+  try {
+    await storage.readFile(project, "board.loon.json");
+    lines.push("board: placed (board.kicad_pcb exists)");
+  } catch {
+    lines.push("board: not generated yet");
+  }
+  void schem;
+  return lines.join("\n");
+}
+
+async function footprintsFor(schem: Schematic): Promise<Record<string, any>> {
+  const specs = new Map<string, number>();
+  for (const s of schem.symbols) {
+    const fp = s.properties.Footprint;
+    if (!fp) continue;
+    const def = library.get(s.libId)?.def ?? schem.libSymbols[s.libId];
+    specs.set(fp, def?.pins.length ?? 2);
+  }
+  return getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+}
+
+async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob): Promise<string> {
+  const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+  switch (a.action) {
+    case "sync_pins": {
+      const targets = firmwareTargets(schem, defs);
+      if (targets.length === 0) return "no MCU on the sheet, nothing to map";
+      const t = targets[0];
+      await storage.writeFile(project, "firmware/include/board_pins.h", generatePinsHeader(t));
+      const scaffold = async (path: string, text: string) => {
+        try {
+          await storage.readFile(project, path);
+        } catch {
+          await storage.writeFile(project, path, text);
+        }
+      };
+      await scaffold("firmware/platformio.ini", generatePlatformIni(t));
+      await scaffold("firmware/src/main.cpp", generateMainStub(t));
+      job.touched!.firmware = true;
+      return `${t.pins.length} pins mapped from ${t.ref}`;
+    }
+    case "generate_board": {
+      const footprints = await footprintsFor(schem);
+      let existing: Board | undefined;
+      if (a.keepPlacement !== false) {
+        try {
+          existing = JSON.parse(await storage.readFile(project, "board.loon.json")) as Board;
+        } catch {
+          /* first board */
+        }
+      }
+      const res = generateBoard(schem, defs, { rules: OSHPARK_2LAYER, footprints, existing });
+      await storage.writeFile(project, "board.loon.json", JSON.stringify(res.board, null, 2));
+      await storage.writeFile(project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)));
+      await storage.writeFile(project, "board.kicad_pro", serializeProject(res.board, "board"));
+      job.touched!.board = true;
+      const rats = ratsnest(res.board, footprints);
+      const notes = [`placed ${res.placed} parts`, `${rats.length} connections to route`];
+      if (res.missingFootprints.length) notes.push(`${res.missingFootprints.length} parts have no footprint set`);
+      if (res.approximate.length) notes.push(`${res.approximate.length} generated land patterns to check`);
+      return notes.join(", ");
+    }
+    case "run_drc": {
+      const res = await runKicadDrc(project);
+      job.touched!.board = true;
+      if (res.error) return res.error;
+      const errors = res.violations.filter((v) => v.severity === "error");
+      job.log = (job.log ?? "") + res.violations.map((v) => `[${v.severity}] ${v.rule}: ${v.message}`).join("\n");
+      return `${errors.length} errors, ${res.violations.length - errors.length} warnings, ${res.unconnected} unrouted`;
+    }
+    case "build_firmware": {
+      const build = startBuild(project);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const j = getBuild(build.id);
+        if (!j || j.state !== "running") {
+          job.log = (job.log ?? "") + (j?.log ?? "").slice(-4000);
+          job.touched!.firmware = true;
+          if (!j || j.state === "error") throw new Error(j?.error ?? "build failed");
+          return `built ${j.artifacts?.length ?? 0} images`;
+        }
+      }
+    }
+    case "run_qemu": {
+      const sim = startQemu(project, a.seconds ?? 15);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const j = getSim(sim.id);
+        if (!j || j.state !== "running") {
+          job.log = (job.log ?? "") + (j?.log ?? "").slice(-6000);
+          job.touched!.sim = true;
+          if (!j || j.state === "error") throw new Error(j?.error ?? "emulation failed");
+          const kicks = (j.log.match(/KICK/g) ?? []).length;
+          const panic = /assert failed|Guru Meditation/i.test(j.log);
+          return `${kicks} heartbeat lines${panic ? ", firmware panicked" : ""}`;
+        }
+      }
+    }
+    case "run_spice": {
+      const probes: string[] = a.probes ?? [];
+      const bench = {
+        name: "assistant bench",
+        analysis: "tran" as const,
+        tranStop: a.stop ?? 0.1,
+        tranStep: (a.stop ?? 0.1) / 1000,
+        sources: [
+          { net: "+3V3", kind: "pulse" as const, pulse: { v1: 0, v2: 3.3, delay: 0, rise: 1e-4, fall: 1e-4, width: 10, period: 20 } },
+          { net: "+5V", kind: "dc" as const, dc: 5 },
+          { net: "+24V", kind: "dc" as const, dc: 24 },
+        ],
+        probes,
+      };
+      const deck = buildSpiceDeck(schem, bench, defs);
+      const sim = startSpice(project, deck.text);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const j = getSim(sim.id);
+        if (!j || j.state !== "running") {
+          job.touched!.sim = true;
+          if (!j || j.state === "error") throw new Error(j?.error ?? "ngspice failed");
+          const series = j.data ? parseWrdata(j.data, probes) : [];
+          return series.map((x) => `${x.name} ends at ${(x.points[x.points.length - 1]?.v ?? 0).toFixed(2)}V`).join(", ") || "ran";
+        }
+      }
+    }
+    default:
+      throw new Error(`unknown action ${a.action}`);
+  }
+}
+
 const sourceEnum = z.enum(ALL_SOURCES as [string, ...string[]]);
 
 const librouter = router({
@@ -104,6 +249,12 @@ interface AiJob {
   schem?: Schematic;
   results?: unknown[];
   error?: string;
+  // What the assistant did beyond editing the sheet, so the UI can report it
+  // and refresh the views it touched.
+  steps?: { label: string; ok: boolean; detail?: string }[];
+  files?: string[];
+  log?: string;
+  touched?: { board?: boolean; firmware?: boolean; sim?: boolean };
 }
 const aiJobs = new Map<string, AiJob>();
 
@@ -122,22 +273,51 @@ const aiRouter = router({
       return { message: ai.message, ops: ai.ops, schem, results, raw: ai.raw };
     }),
 
+  // The one conversation. It edits the schematic, writes firmware, lays out the
+  // board and runs the simulators, so the user never has to go find a button.
   start: publicProcedure
-    .input(z.object({ message: z.string(), schem: z.any() }))
+    .input(z.object({ message: z.string(), schem: z.any(), project: z.string().optional() }))
     .mutation(({ input }) => {
       reapJobs();
       const id = crypto.randomUUID();
       const schem = input.schem as Schematic;
-      const job: AiJob = { id, started: Date.now(), state: "running" };
+      const project = input.project ?? "untitled";
+      const job: AiJob = { id, started: Date.now(), state: "running", steps: [], files: [], log: "", touched: {} };
       aiJobs.set(id, job);
       (async () => {
+        const step = (label: string, ok: boolean, detail?: string) => {
+          job.steps!.push({ label, ok, detail });
+        };
         try {
-          const ai = await generateOps(input.message, schem);
+          job.message = "Thinking about the whole board...";
+          const state = await projectState(project, schem);
+          const ai = await generateOps(input.message, schem, state);
           const { results } = applyOps(schem, ai.ops, makeResolver(schem));
-          job.message = ai.message;
           job.ops = ai.ops;
           job.schem = schem;
           job.results = results;
+          job.message = ai.message;
+
+          // Firmware files first: a later build should compile what was written.
+          for (const f of ai.files) {
+            if (f.path.includes("board_pins.h")) continue; // generated, never authored
+            await storage.writeFile(project, `firmware/${f.path}`, f.content);
+            job.files!.push(f.path);
+            job.touched!.firmware = true;
+          }
+          if (ai.files.length) step(`wrote ${job.files!.join(", ")}`, true);
+
+          // Then the actions, in the order the assistant asked for them.
+          for (const a of ai.actions) {
+            job.message = `Running ${a.action.replace(/_/g, " ")}...`;
+            try {
+              const detail = await runAiAction(a, project, schem, job);
+              step(a.action.replace(/_/g, " "), true, detail);
+            } catch (e: any) {
+              step(a.action.replace(/_/g, " "), false, String(e?.message ?? e));
+            }
+          }
+          job.message = ai.message;
           job.state = "done";
         } catch (e: any) {
           job.error = String(e?.message ?? e);
@@ -160,6 +340,10 @@ const aiRouter = router({
         schem: job.schem,
         results: job.results,
         error: job.error,
+        steps: job.steps,
+        files: job.files,
+        log: job.log?.slice(-6000),
+        touched: job.touched,
       };
     }),
 });

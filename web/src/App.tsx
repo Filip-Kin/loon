@@ -32,6 +32,7 @@ export function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState<string | null>(null);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [rightTab, setRightTab] = useState<"props" | "ai" | "debug" | "check">("ai");
   const [issues, setIssues] = useState<ErcIssue[]>([]);
@@ -41,6 +42,10 @@ export function App() {
   const [view, setView] = useState<"schematic" | "blocks" | "pcb" | "code" | "sim">("schematic");
   const [blockSel, setBlockSel] = useState<string | null>(null);
   const [blockViewport, setBlockViewport] = useState<Viewport>({ x: 40, y: 40, scale: 1.6 });
+  // Bumped when the assistant touches the board or the firmware, so those views
+  // reload without the user going to look.
+  const [boardRev, setBoardRev] = useState(0);
+  const [firmwareRev, setFirmwareRev] = useState(0);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -167,22 +172,32 @@ export function App() {
     const started = Date.now();
     const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const { id } = await trpc.ai.start.mutate({ message: text, schem });
+      const { id } = await trpc.ai.start.mutate({ message: text, schem, project: projectName });
       let res: any = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const st: any = await trpc.ai.status.query({ id });
-        if (st.state === "running") continue;
+        if (st.state === "running") {
+          // The assistant reports what it is doing while it does it.
+          if (st.message) setProgress(st.message);
+          continue;
+        }
         if (st.state === "error") throw new Error(st.error ?? "generation failed");
         res = st;
         break;
       }
-      if (schem) { past.current.push(schem); future.current = []; }
-      setSchem(res.schem as Schematic);
+      setProgress(null);
+      if (schem && res.schem) { past.current.push(schem); future.current = []; }
+      if (res.schem) setSchem(res.schem as Schematic);
       const failed = (res.results ?? []).filter((r: any) => !r.ok);
-      let note = res.message || `Applied ${(res.ops ?? []).length} operation(s).`;
-      if (failed.length) note += `\n(${failed.length} failed: ${failed.map((f: any) => f.error).join("; ")})`;
-      setMessages((m) => [...m, { role: "bot", text: note }]);
+      const lines: string[] = [res.message || `Applied ${(res.ops ?? []).length} operation(s).`];
+      for (const st of res.steps ?? []) {
+        lines.push(`${st.ok ? "done" : "failed"}: ${st.label}${st.detail ? ` - ${st.detail}` : ""}`);
+      }
+      if (failed.length) lines.push(`(${failed.length} op(s) failed: ${failed.map((f: any) => f.error).join("; ")})`);
+      setMessages((m) => [...m, { role: "bot", text: lines.join("\n") }]);
+      if (res.touched?.board) setBoardRev((r) => r + 1);
+      if (res.touched?.firmware) setFirmwareRev((r) => r + 1);
     } catch (e: any) {
       setMessages((m) => [...m, { role: "err", text: String(e?.message ?? e) }]);
     }
@@ -341,8 +356,8 @@ export function App() {
         <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />
 
         <div className="canvas-wrap">
-          {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} />}
-          {view === "pcb" && <PcbCanvas project={projectName} schem={schem} flash={flash} />}
+          {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} rev={firmwareRev} />}
+          {view === "pcb" && <PcbCanvas project={projectName} schem={schem} flash={flash} rev={boardRev} />}
           {view === "sim" && <SimView project={projectName} schem={schem} defs={renderDefs} flash={flash} />}
           {schem && view === "blocks" && (
             <BlockCanvas
@@ -405,7 +420,7 @@ export function App() {
               highlight={highlightNet}
             />
           ) : rightTab === "ai" ? (
-            <AiPanel messages={messages} busy={busy} elapsed={elapsed} aiAvailable={aiAvailable} onSend={aiSend} />
+            <AiPanel messages={messages} busy={busy} elapsed={elapsed} progress={progress} aiAvailable={aiAvailable} onSend={aiSend} />
           ) : (
             <PropertiesPanel
               inst={selInst}

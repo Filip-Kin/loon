@@ -9,6 +9,8 @@ interface Props {
   project: string;
   schem: Schematic | null;
   flash: (text: string, err?: boolean) => void;
+  // Bumped by the assistant when it regenerates the board.
+  rev?: number;
 }
 
 const LAYER_COLOR: Record<string, string> = {
@@ -29,7 +31,7 @@ function rot(p: Point, deg: number): Point {
 // The layout view. Pads and silkscreen are KiCad's own land patterns; loon owns
 // placement, tracks and the outline. The board file this writes is what gets
 // uploaded, so what is drawn here is what gets fabricated.
-export function PcbCanvas({ project, schem, flash }: Props) {
+export function PcbCanvas({ project, schem, flash, rev }: Props) {
   const [board, setBoard] = useState<Board | null>(null);
   const [fps, setFps] = useState<Record<string, Footprint>>({});
   const [view, setView] = useState({ x: 60, y: 60, scale: 4 });
@@ -57,7 +59,7 @@ export function PcbCanvas({ project, schem, flash }: Props) {
       // No board yet: opening this view is the request for one.
       if (schem && schem.symbols.length > 0) await generate(false);
     })().catch((e) => flash(String(e?.message ?? e), true));
-  }, [project, schem]);
+  }, [project, schem, rev]);
 
   const rats = useMemo(() => (board ? ratsnest(board, fps) : []), [board, fps]);
 

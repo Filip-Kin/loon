@@ -28,7 +28,26 @@ const AI_TIMEOUT_MS = Number(process.env.LOON_AI_TIMEOUT_MS ?? 900_000);
 export interface AiResult {
   message: string;
   ops: Op[];
+  files: { path: string; content: string }[];
+  actions: AiAction[];
   raw: string;
+}
+
+// Things the assistant can do that are not schematic edits. These are the
+// buttons, made available to the conversation so the user never has to hunt
+// for them.
+export interface AiAction {
+  action:
+    | "sync_pins"
+    | "generate_board"
+    | "run_drc"
+    | "build_firmware"
+    | "run_qemu"
+    | "run_spice";
+  keepPlacement?: boolean;
+  seconds?: number;
+  probes?: string[];
+  stop?: number;
 }
 
 function partsContext(): string {
@@ -144,7 +163,8 @@ function buildPrompt(userMessage: string, schem: Schematic): string {
 Convert the user's request into schematic edit operations.
 
 OUTPUT CONTRACT: respond with ONLY a single JSON object, no prose, no markdown fences:
-{"message": "<one short sentence for the user>", "ops": [ <op>, ... ]}
+{"message": "<one short sentence for the user>", "ops": [ <op>, ... ], "files": [ {"path":"src/main.cpp","content":"..."} ], "actions": [ <action>, ... ]}
+"ops", "files" and "actions" are all optional; include the ones the request needs.
 
 ${OP_SPEC}
 
@@ -172,6 +192,18 @@ ${budgetContext(schem)}
 CURRENT BOM AND COST:
 ${bomContext(schem)}
 
+ACTIONS YOU CAN TAKE (put them in "actions", they run in order after your ops are applied):
+- {"action":"sync_pins"}         regenerate firmware/include/board_pins.h from the schematic, and scaffold platformio.ini and src/main.cpp if the project has no firmware yet. Run this after changing which nets touch the MCU.
+- {"action":"generate_board","keepPlacement":true}   place every part with a footprint onto the PCB and write board.kicad_pcb. keepPlacement keeps parts you already positioned.
+- {"action":"run_drc"}           run KiCad's own design rule check on the saved board.
+- {"action":"build_firmware"}    compile the firmware in a container.
+- {"action":"run_qemu","seconds":15}   boot the built firmware on an emulated ESP32 and capture its serial output.
+- {"action":"run_spice","probes":["EN"],"stop":0.1}  run ngspice on the current netlist and return the waveforms.
+
+WRITING FIRMWARE: put whole files in "files", paths relative to the firmware/ folder, e.g. {"path":"src/main.cpp","content":"..."}. Always return the COMPLETE file, never a fragment or a diff. Never write include/board_pins.h - it is generated from the schematic. Keep printing a line containing the word KICK at least four times a second in the main loop: the simulator feeds the board's watchdog from that line, so firmware that stops looping trips the e-stop latch in simulation exactly as it would in hardware.
+
+DO THE WHOLE JOB. If the user asks for firmware, write the files AND sync_pins AND build_firmware. If they ask for a board or a layout, generate_board AND run_drc. If they ask you to test it, build and run. Never tell the user to press a button: you have the actions, use them.
+
 ANSWERING DESIGN QUESTIONS:
 If the user asks a question rather than giving an instruction ("how much would X cost", "do I have enough pins", "can I do Y on board"), answer it in "message" and return an empty ops array. Such an answer must contain:
 - the parts it needs, with quantity and the unit price from the parts list, and a total in dollars. Say when a price is an estimate rather than a live quote.
@@ -187,7 +219,7 @@ ${userMessage}
 Remember: output only the JSON object.`;
 }
 
-function extractJson(text: string): { message: string; ops: Op[] } {
+function extractJson(text: string): { message: string; ops: Op[]; files: { path: string; content: string }[]; actions: AiAction[] } {
   let t = text.trim();
   // Strip code fences if the model added them.
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -198,8 +230,16 @@ function extractJson(text: string): { message: string; ops: Op[] } {
   if (start >= 0 && end > start) t = t.slice(start, end + 1);
   const parsed = JSON.parse(t);
   const ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+  const files = Array.isArray(parsed.files)
+    ? parsed.files.filter((f: any) => typeof f?.path === "string" && typeof f?.content === "string")
+    : [];
+  const actions = Array.isArray(parsed.actions)
+    ? parsed.actions
+        .map((a: any) => (typeof a === "string" ? { action: a } : a))
+        .filter((a: any) => typeof a?.action === "string")
+    : [];
   const message = typeof parsed.message === "string" ? parsed.message : "";
-  return { message, ops };
+  return { message, ops, files, actions };
 }
 
 async function runClaude(prompt: string): Promise<string> {
@@ -302,9 +342,9 @@ export async function generateFirmware(
   return { message: typeof parsed.message === "string" ? parsed.message : "", files, raw };
 }
 
-export async function generateOps(userMessage: string, schem: Schematic): Promise<AiResult> {
-  const prompt = buildPrompt(userMessage, schem);
+export async function generateOps(userMessage: string, schem: Schematic, projectState = ""): Promise<AiResult> {
+  const prompt = buildPrompt(userMessage, schem) + (projectState ? `\n\nPROJECT STATE:\n${projectState}\n` : "");
   const raw = await runClaude(prompt);
-  const { message, ops } = extractJson(raw);
-  return { message, ops, raw };
+  const { message, ops, files, actions } = extractJson(raw);
+  return { message, ops, files, actions, raw };
 }
