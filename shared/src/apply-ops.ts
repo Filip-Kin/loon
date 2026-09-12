@@ -3,7 +3,7 @@
 // all funnel Op[] through here. It is pure over a LibResolver so the browser
 // (instant local edits) and the server (AI edits) run identical logic.
 
-import type { Schematic, SymbolInstance, LibSymbol } from "./schematic";
+import type { Schematic, SymbolInstance, LibSymbol, Point } from "./schematic";
 import type { Op, OpResult } from "./ops";
 import { findPin, pinWorld, routeOrthogonal, snapPoint, PLACE_GRID } from "./geometry";
 import { MODULES } from "./modules";
@@ -33,6 +33,13 @@ function nextRef(schem: Schematic, prefix: string): string {
 }
 
 const normRef = (r: string) => r.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+
+// Power and ground nets are joined by name everywhere, the way a schematic is
+// normally drawn; everything else inside a block is drawn as wire.
+const RAIL_NETS = /^(GND|AGND|PGND|VBUS|VCC|VDD|\+?\d+V\d*|\+\d+V)$/i;
+function isRailNet(label: string): boolean {
+  return RAIL_NETS.test(label.trim());
+}
 
 function findByRef(schem: Schematic, ref: string): SymbolInstance | undefined {
   // Exact match first, then a forgiving normalized match so an AI-guessed
@@ -206,15 +213,45 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       for (const w of block.wires) {
         applyOp(schem, { op: "connect_pins", a: { ref: localToRef.get(w.a.local) ?? w.a.local, pin: w.a.pin }, b: { ref: localToRef.get(w.b.local) ?? w.b.local, pin: w.b.pin } }, resolve);
       }
-      // Exposed nets become labels placed at the pin's world position.
+      // Nets inside a module get drawn as real wires between the pins that
+      // share them, with a single label left on the net so other blocks can
+      // still join it by name. Power rails stay label-only: chaining every GND
+      // pin into one polyline is spaghetti, and rails are understood by name.
+      const netPoints = new Map<string, { at: Point; first: boolean }[]>();
       for (const net of block.nets) {
         const ref = localToRef.get(net.local);
         const inst = schem.symbols.find((s) => s.properties.Reference === ref);
         const def = inst ? resolve(inst.libId)?.def : undefined;
         const pin = def ? findPin(def, net.pin) ?? def.pins.find((pp) => pp.name.toLowerCase() === net.pin.toLowerCase()) : undefined;
-        if (inst && pin) {
-          const at = pinWorld(pin, inst);
-          schem.labels.push({ uuid: newUuid(), kind: "local", text: net.label, at, rotation: 0 });
+        if (!inst || !pin) continue;
+        const at = pinWorld(pin, inst);
+        const list = netPoints.get(net.label) ?? [];
+        list.push({ at, first: list.length === 0 });
+        netPoints.set(net.label, list);
+      }
+      for (const [label, pts] of netPoints) {
+        if (!isRailNet(label) && pts.length > 1) {
+          // Chain the pins nearest-first so the wire order follows the layout
+          // rather than the order the module happened to declare them in.
+          const remaining = pts.slice(1).map((p) => p.at);
+          let cur = pts[0].at;
+          while (remaining.length > 0) {
+            let bestIdx = 0;
+            let bestD = Infinity;
+            for (let i = 0; i < remaining.length; i++) {
+              const d = Math.abs(remaining[i].x - cur.x) + Math.abs(remaining[i].y - cur.y);
+              if (d < bestD) { bestD = d; bestIdx = i; }
+            }
+            const next = remaining.splice(bestIdx, 1)[0];
+            schem.wires.push({ uuid: newUuid(), pts: routeOrthogonal(cur, next) });
+            cur = next;
+          }
+        }
+        // One label per net inside the block (every pin for rails, so the
+        // ground and supply symbols read at a glance).
+        const labelled = isRailNet(label) ? pts : [pts[0]];
+        for (const pt of labelled) {
+          schem.labels.push({ uuid: newUuid(), kind: "local", text: label, at: pt.at, rotation: 0 });
         }
       }
       return { ok: true, createdUuid: firstUuid };

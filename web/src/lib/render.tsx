@@ -94,7 +94,7 @@ export function SymbolView({ inst, def, selected }: { inst: SymbolInstance; def:
             <circle cx={a.x} cy={a.y} r={0.5} fill={PIN} />
             {named && (
               <>
-                <text x={b.x + Math.sign(dx) * 0.6} y={b.y + 0.45} fontSize={1.1} fill={TEXT} textAnchor={anchor}>{pin.name}</text>
+                <text x={b.x + Math.sign(dx) * 0.6} y={b.y + 0.45} fontSize={1.1} fill={TEXT} stroke="#14151a" strokeWidth={0.4} paintOrder="stroke" strokeLinejoin="round" textAnchor={anchor}>{pin.name}</text>
                 <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 0.4} fontSize={0.9} fill="#6f6f6f" textAnchor="middle">{pin.number}</text>
               </>
             )}
@@ -102,8 +102,8 @@ export function SymbolView({ inst, def, selected }: { inst: SymbolInstance; def:
         );
       })}
       {/* Reference + value text, kept upright for readability. */}
-      <text x={inst.at.x + 2} y={inst.at.y - 3} fontSize={1.4} fill={selected ? "#fff" : "#cfcfcf"}>{inst.properties.Reference}</text>
-      <text x={inst.at.x + 2} y={inst.at.y - 1.2} fontSize={1.3} fill={TEXT}>{inst.properties.Value}</text>
+      <text x={inst.at.x + 2} y={inst.at.y - 3} fontSize={1.4} fill={selected ? "#fff" : "#cfcfcf"} stroke="#14151a" strokeWidth={0.45} paintOrder="stroke" strokeLinejoin="round">{inst.properties.Reference}</text>
+      <text x={inst.at.x + 2} y={inst.at.y - 1.2} fontSize={1.3} fill={TEXT} stroke="#14151a" strokeWidth={0.45} paintOrder="stroke" strokeLinejoin="round">{inst.properties.Value}</text>
     </g>
   );
 }

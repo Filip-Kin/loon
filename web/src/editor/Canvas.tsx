@@ -259,7 +259,7 @@ export function Canvas(props: Props) {
         {schem.labels.map((l) => (
           <g key={l.uuid}>
             <circle cx={l.at.x} cy={l.at.y} r={0.5} fill="#10b981" />
-            <text x={l.at.x + 1} y={l.at.y - 0.6} fontSize={1.6} fill="#10b981">{l.text}</text>
+            <text x={l.at.x + 1} y={l.at.y - 0.6} fontSize={1.5} fill="#10b981" stroke="#14151a" strokeWidth={0.5} paintOrder="stroke" strokeLinejoin="round">{l.text}</text>
           </g>
         ))}
 
