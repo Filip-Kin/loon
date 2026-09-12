@@ -14,6 +14,7 @@ import { moduleSummaries } from "@loon/shared/modules";
 import { pinBudget, formatBudget } from "@loon/shared/pinbudget";
 import { buildNetlist, formatNetlist } from "@loon/shared/netlist";
 import { runErc, formatErc } from "@loon/shared/erc";
+import { buildBlockGraph } from "@loon/shared/blockgraph";
 import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
 
@@ -46,6 +47,16 @@ function partsContext(): string {
 // channels", which is exactly the kind of guess that costs a board spin.
 function defResolver(libId: string) {
   return library.get(libId)?.def;
+}
+
+function blockContext(schem: Schematic): string {
+  const g = buildBlockGraph(schem, defResolver);
+  if (g.blocks.length === 0) return "(no module blocks yet)";
+  const lines = g.blocks.map(
+    (b) => `- ${b.moduleId} [blockId ${b.id}] ${b.partCount} parts, params ${JSON.stringify(b.params)}, ports: ${b.ports.map((p) => p.net).join(", ")}`,
+  );
+  if (g.looseRefs.length) lines.push(`- loose parts outside any block: ${g.looseRefs.join(", ")}`);
+  return lines.join("\n");
 }
 
 function netlistContext(schem: Schematic): string {
@@ -119,7 +130,13 @@ CRITICAL RULES:
   Declares a part that is not in the catalog. The symbol is generated from the pin list, renders immediately, wires like any other part, and is written into the saved KiCad file.
 
 NEVER SUBSTITUTE A PLACEHOLDER. If the user asks for a chip, module or connector that is not in the parts list, emit define_symbol with its real pinout from the datasheet and then use it. Do not drop in a generic pin header "as a placeholder", do not tell the user to swap a part later, and do not ask them to supply a symbol. A design the user cannot manufacture as-drawn is a failed answer: the board they order must have the chip on it.
-Pin side hint for define_symbol: power and inputs on the left, outputs and buses on the right; the body and pin geometry are generated for you.`;
+Pin side hint for define_symbol: power and inputs on the left, outputs and buses on the right; the body and pin geometry are generated for you.
+
+BLOCK-LEVEL OPS (the block view is the same document, grouped by module):
+- {"op":"move_block","blockId":"...","by":{"dx":40,"dy":0}}
+- {"op":"delete_block","blockId":"..."}
+- {"op":"set_block_params","blockId":"...","params":{"inputs":4}}   (rebuilds the block from its module; hand edits inside it are lost)
+- {"op":"rename_net","from":"ARM","to":"IO21_ARM"}   (joins two nets by name; this is how block ports connect)`;
 
 function buildPrompt(userMessage: string, schem: Schematic): string {
   return `You are the schematic design assistant inside Loon, an electronics CAD tool.
@@ -138,6 +155,9 @@ ${partsContext()}
 
 CURRENT SCHEMATIC:
 ${schematicContext(schem)}
+
+BLOCKS ON THE SHEET:
+${blockContext(schem)}
 
 NETS (derived from the sheet, this is the real connectivity):
 ${netlistContext(schem)}

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "./trpc";
 import { Canvas, type Tool, type Viewport } from "./editor/Canvas";
+import { BlockCanvas } from "./editor/BlockCanvas";
+import type { GraphBlock } from "@loon/shared/blockgraph";
 import { PartsPanel } from "./panels/PartsPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { AiPanel, type ChatMsg } from "./panels/AiPanel";
@@ -33,6 +35,9 @@ export function App() {
   const [nets, setNets] = useState<{ name: string; isPower: boolean; pins: string[] }[]>([]);
   const [checking, setChecking] = useState(false);
   const [highlightNet, setHighlightNet] = useState<string | null>(null);
+  const [view, setView] = useState<"schematic" | "blocks">("schematic");
+  const [blockSel, setBlockSel] = useState<string | null>(null);
+  const [blockViewport, setBlockViewport] = useState<Viewport>({ x: 40, y: 40, scale: 1.6 });
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -313,8 +318,12 @@ export function App() {
           {saveState === "saving" ? "Saving..." : saveState === "dirty" ? "Unsaved" : saveState === "error" ? "Save failed" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved"}
         </span>
         <div className="desktop-only" style={{ width: 1, height: 22, background: "var(--line)" }} />
-        <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>
-        <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>
+        <div className="viewswitch">
+          <button className={view === "blocks" ? "on" : ""} onClick={() => setView("blocks")}>Blocks</button>
+          <button className={view === "schematic" ? "on" : ""} onClick={() => setView("schematic")}>Schematic</button>
+        </div>
+        {view === "schematic" && <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>}
+        {view === "schematic" && <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>}
         {placingLibId && <span className="status">Placing {placingLibId}{isMobile ? " - tap sheet" : " - click sheet (Esc to stop)"}</span>}
         <div className="spacer" />
         <button className="desktop-only" onClick={undo}>Undo</button>
@@ -326,7 +335,27 @@ export function App() {
         <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />
 
         <div className="canvas-wrap">
-          {schem && (
+          {schem && view === "blocks" && (
+            <BlockCanvas
+              schem={schem}
+              defs={renderDefs}
+              viewport={blockViewport}
+              setViewport={setBlockViewport}
+              selection={blockSel}
+              onSelect={setBlockSel}
+              onOps={(ops) => applyLocal(ops)}
+              onDrillIn={(b: GraphBlock) => {
+                // Drill in: jump to the schematic centred on the block.
+                setView("schematic");
+                const cx = (b.box.min.x + b.box.max.x) / 2;
+                const cy = (b.box.min.y + b.box.max.y) / 2;
+                const scale = 4;
+                setViewport({ scale, x: window.innerWidth / 2 - cx * scale, y: window.innerHeight / 2 - cy * scale });
+                setSelection(b.memberUuids[0] ?? null);
+              }}
+            />
+          )}
+          {schem && view === "schematic" && (
             <Canvas
               schem={schem}
               defs={renderDefs}

@@ -26,7 +26,18 @@ export type Op =
   // connector) from its pin list. The generated symbol is stored on the
   // schematic, so it renders, wires and saves exactly like a builtin part.
   // This exists so the assistant never has to stand in a placeholder header.
-  | ({ op: "define_symbol" } & IcSymbolSpec);
+  | ({ op: "define_symbol" } & IcSymbolSpec)
+  // #region block-level ops
+  // The block view edits the schematic through these; they are ordinary ops so
+  // undo, the AI and the API all behave the same in either view.
+  | { op: "move_block"; blockId: string; by?: { dx: number; dy: number }; at?: { x: number; y: number } }
+  | { op: "delete_block"; blockId: string }
+  // Join two nets by name: every label reading `from` becomes `to`. This is how
+  // connecting two block ports is expressed.
+  | { op: "rename_net"; from: string; to: string }
+  // Re-expand a block with new parameters. Its old parts are removed first, so
+  // hand edits inside the block are lost - the UI must confirm.
+  | { op: "set_block_params"; blockId: string; params: Record<string, string | number> };
 
 export interface OpResult {
   ok: boolean;

@@ -220,6 +220,83 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       return { ok: true };
     }
 
+    case "move_block": {
+      const members = schem.symbols.filter((s) => s.properties.LoonBlock === op.blockId);
+      if (members.length === 0) return { ok: false, error: `No block ${op.blockId}` };
+      let dx = op.by?.dx ?? 0;
+      let dy = op.by?.dy ?? 0;
+      if (op.at) {
+        // Move so the block's top-left member lands on `at`.
+        const minX = Math.min(...members.map((m) => m.at.x));
+        const minY = Math.min(...members.map((m) => m.at.y));
+        dx = op.at.x - minX;
+        dy = op.at.y - minY;
+      }
+      for (const m of members) m.at = snapPoint({ x: m.at.x + dx, y: m.at.y + dy }, PLACE_GRID);
+      // Wires and labels inside the block travel with it.
+      const refs = new Set(members.map((m) => m.properties.Reference));
+      for (const l of schem.labels) {
+        // Only labels that sat on a member pin move; a label out on the sheet
+        // belongs to the sheet.
+        for (const m of members) {
+          const d = resolve(m.libId)?.def;
+          if (!d) continue;
+          const hit = d.pins.some((pin) => {
+            const at = pinWorld(pin, { at: { x: m.at.x - dx, y: m.at.y - dy }, rotation: m.rotation, mirror: m.mirror });
+            return Math.abs(at.x - l.at.x) < 0.6 && Math.abs(at.y - l.at.y) < 0.6;
+          });
+          if (hit) {
+            l.at = { x: l.at.x + dx, y: l.at.y + dy };
+            break;
+          }
+        }
+      }
+      for (const w of schem.wires) {
+        const inside = w.pts.every((pt) =>
+          members.some((m) => {
+            const d = resolve(m.libId)?.def;
+            if (!d) return false;
+            return d.pins.some((pin) => {
+              const at = pinWorld(pin, { at: { x: m.at.x - dx, y: m.at.y - dy }, rotation: m.rotation, mirror: m.mirror });
+              return Math.abs(at.x - pt.x) < 8 && Math.abs(at.y - pt.y) < 8;
+            });
+          }),
+        );
+        if (inside) w.pts = w.pts.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+      }
+      void refs;
+      return { ok: true };
+    }
+
+    case "delete_block": {
+      const members = schem.symbols.filter((s) => s.properties.LoonBlock === op.blockId);
+      if (members.length === 0) return { ok: false, error: `No block ${op.blockId}` };
+      for (const m of members) applyOp(schem, { op: "delete", uuid: m.uuid }, resolveBase);
+      return { ok: true };
+    }
+
+    case "rename_net": {
+      let n = 0;
+      for (const l of schem.labels) {
+        if (l.text === op.from) {
+          l.text = op.to;
+          n++;
+        }
+      }
+      return n > 0 ? { ok: true } : { ok: false, error: `No net named ${op.from}` };
+    }
+
+    case "set_block_params": {
+      const members = schem.symbols.filter((s) => s.properties.LoonBlock === op.blockId);
+      if (members.length === 0) return { ok: false, error: `No block ${op.blockId}` };
+      const moduleId = members[0].properties.LoonModule;
+      if (!moduleId || !MODULES[moduleId]) return { ok: false, error: `Block ${op.blockId} has no module to rebuild from` };
+      const at = { x: Math.min(...members.map((m) => m.at.x)), y: Math.min(...members.map((m) => m.at.y)) };
+      const old = JSON.parse(members[0].properties.LoonBlockParams ?? "{}");
+      for (const m of members) applyOp(schem, { op: "delete", uuid: m.uuid }, resolveBase);
+      return applyOp(schem, { op: "instantiate_module", moduleId, params: { ...old, ...op.params }, at }, resolveBase);
+    }
+
     case "instantiate_module": {
       const mod = MODULES[op.moduleId];
       if (!mod) return { ok: false, error: `Unknown module: ${op.moduleId}` };
