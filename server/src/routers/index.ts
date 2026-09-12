@@ -116,7 +116,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
       await storage.writeFile(project, "board.kicad_pro", serializeProject(res.board, "board"));
       job.touched!.board = true;
       const rats = ratsnest(res.board, footprints);
-      const notes = [`placed ${res.placed} parts`, `${rats.length} connections to route`];
+      const notes = [`placed ${res.placed} parts`, ...res.notes, `${rats.length} connections to route`];
       if (res.missingFootprints.length) notes.push(`${res.missingFootprints.length} parts have no footprint set`);
       if (res.approximate.length) notes.push(`${res.approximate.length} generated land patterns to check`);
       return notes.join(", ");
@@ -528,7 +528,7 @@ const pcbRouter = router({
       await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2));
       await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)));
       await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"));
-      return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate };
+      return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes: res.notes };
     }),
 
   load: publicProcedure

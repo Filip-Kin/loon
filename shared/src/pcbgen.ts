@@ -9,6 +9,7 @@ import type { Schematic, Point } from "./schematic";
 import type { Footprint } from "./footprint";
 import { buildNetlist, type Netlist, type DefResolver } from "./netlist";
 import { emptyBoard, rectOutline, type Board, type PlacedFootprint, type DesignRules, OSHPARK_2LAYER } from "./board";
+import { autoPlace } from "./placement";
 
 export interface RatsnestLine {
   net: string;
@@ -36,6 +37,8 @@ export interface GenerateResult {
   placed: number;
   missingFootprints: { ref: string; libId: string }[];
   approximate: string[];
+  // What the placement decided, in words.
+  notes: string[];
 }
 
 export function generateBoard(schem: Schematic, resolve: DefResolver | undefined, opts: GenerateOptions): GenerateResult {
@@ -145,18 +148,26 @@ export function generateBoard(schem: Schematic, resolve: DefResolver | undefined
     void blockWidth;
   }
 
-  // Outline wraps everything with a margin.
-  let maxX = 0;
-  let maxY = 0;
-  for (const f of board.footprints) {
-    const fp = opts.footprints[f.libId];
-    const s = fp ? sizeOf(fp) : { w: 5, h: 5 };
-    maxX = Math.max(maxX, f.at.x + s.w / 2);
-    maxY = Math.max(maxY, f.at.y + s.h / 2);
+  // Turn the rows into a layout: terminals on the outside edges, each channel's
+  // breaker and switch inline behind it, lugs at the input end, converters in
+  // the middle, logic away from the switching nodes.
+  const notes: string[] = [];
+  if (!opts.existing) {
+    const res = autoPlace(board, opts.footprints, nl);
+    notes.push(...res.notes);
+  } else {
+    let maxX = 0;
+    let maxY = 0;
+    for (const f of board.footprints) {
+      const fp = opts.footprints[f.libId];
+      const s = fp ? sizeOf(fp) : { w: 5, h: 5 };
+      maxX = Math.max(maxX, f.at.x + s.w / 2);
+      maxY = Math.max(maxY, f.at.y + s.h / 2);
+    }
+    board.outline = rectOutline(0, 0, Math.ceil(maxX + EDGE), Math.ceil(maxY + EDGE));
   }
-  board.outline = rectOutline(0, 0, Math.ceil(maxX + EDGE), Math.ceil(maxY + EDGE));
 
-  return { board, placed: board.footprints.length, missingFootprints: missing, approximate };
+  return { board, placed: board.footprints.length, missingFootprints: missing, approximate, notes };
 }
 
 // #region ratsnest
