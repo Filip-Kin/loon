@@ -10,6 +10,8 @@ interface Props {
   schem: Schematic | null;
   defs: Record<string, LibSymbol>;
   flash: (text: string, err?: boolean) => void;
+  // Which board in the project this view is showing.
+  board?: string;
 }
 
 const LEVEL_COLOR: Record<string, string> = { "1": "#34d399", "0": "#5b6472", z: "#d8b24a" };
@@ -21,7 +23,7 @@ const SERIAL_TIMEOUT_MS = 2500;
 // the emulated firmware is wired into the same watchdog the hardware watches,
 // and SPICE plots whatever net you clicked. Killing the firmware in the console
 // trips the latch on the schematic, which is the whole point.
-export function SimView({ project, schem, defs, flash }: Props) {
+export function SimView({ project, schem, defs, flash, board }: Props) {
   const [tick, setTick] = useState(0);
   const [running, setRunning] = useState(true);
   const [probes, setProbes] = useState<string[]>([]);
@@ -84,7 +86,7 @@ export function SimView({ project, schem, defs, flash }: Props) {
     setQemuState("running");
     lastSerial.current = { len: 0, at: Date.now(), kickAt: Date.now(), sawKick: false, panicked: false };
     try {
-      const { id } = await trpc.sim.qemu.mutate({ project, seconds: 45 });
+      const { id } = await trpc.sim.qemu.mutate({ project, seconds: 45, board });
       for (;;) {
         await new Promise((r) => setTimeout(r, 900));
         const st: any = await trpc.sim.status.query({ id });
@@ -149,7 +151,7 @@ export function SimView({ project, schem, defs, flash }: Props) {
         ],
         probes,
       };
-      const res = await trpc.sim.spice.mutate({ project, schem, bench });
+      const res = await trpc.sim.spice.mutate({ project, schem, bench, board });
       setSpiceNote(res.unmodelled?.length ? `${res.unmodelled.length} parts have no SPICE model and were left out` : "");
       for (;;) {
         await new Promise((r) => setTimeout(r, 1100));

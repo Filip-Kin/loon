@@ -1,14 +1,17 @@
 // #region Storage
 // A project is a folder, not a file, because a design is a schematic plus a
-// board plus firmware plus fab output. On the home server the project directory
+// board plus firmware plus fab output - and a product is often more than one
+// board. A project holds a main board at its root and any number of extra
+// boards under boards/<name>/, each with the same shape. The root layout is
+// unchanged, so every project made before this still opens. On the home server the project directory
 // sits inside the Nextcloud data tree, so everything syncs with no WebDAV round
 // trip. Point LOON_FS_DIR at an ncdata path in production.
 //
-//   MyBoard/
-//     board.kicad_sch
-//     board.kicad_pcb      (later)
-//     firmware/            platformio project
-//     fab/                 gerbers, BOM
+//   MyProduct/
+//     board.kicad_sch      the main board
+//     board.kicad_pcb
+//     firmware/            platformio project for the main board
+//     boards/remote_estop/ another board, same shape, its own firmware
 //
 // Projects saved by the flat-file version are migrated into a folder on first
 // open, and the original file is kept as a .bak rather than deleted.
@@ -45,12 +48,39 @@ class Storage {
     await mkdir(this.dir, { recursive: true });
   }
 
-  projectDir(name: string): string {
-    return join(this.dir, safeName(name));
+  // A unit is "" for the main board, or a board name under boards/.
+  projectDir(name: string, unit = ""): string {
+    const root = join(this.dir, safeName(name));
+    return unit ? join(root, "boards", safeName(unit)) : root;
   }
 
-  private schPath(name: string): string {
-    return join(this.projectDir(name), SCH_FILE);
+  private schPath(name: string, unit = ""): string {
+    return join(this.projectDir(name, unit), SCH_FILE);
+  }
+
+  // Boards inside a project, main board first.
+  async boards(name: string): Promise<string[]> {
+    const out = [""];
+    try {
+      const entries = await readdir(join(this.dir, safeName(name), "boards"), { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        try {
+          await stat(join(this.dir, safeName(name), "boards", e.name, SCH_FILE));
+          out.push(e.name);
+        } catch {
+          /* a folder without a board is not a board */
+        }
+      }
+    } catch {
+      /* no extra boards */
+    }
+    return out;
+  }
+
+  async createBoard(name: string, unit: string, content: string): Promise<void> {
+    await mkdir(this.projectDir(name, unit), { recursive: true });
+    await writeFile(this.schPath(name, unit), content, "utf8");
   }
 
   // Move a flat <name>.kicad_sch into <name>/board.kicad_sch, keeping a .bak.
@@ -77,6 +107,7 @@ class Storage {
     const entries = await readdir(this.dir, { withFileTypes: true });
     const out: ProjectMeta[] = [];
     for (const e of entries) {
+      if (e.name === "boards") continue;
       if (e.isDirectory()) {
         try {
           const s = await stat(join(this.dir, e.name, SCH_FILE));
@@ -98,21 +129,21 @@ class Storage {
     return [...seen.values()].sort((a, b) => b.updated - a.updated);
   }
 
-  async read(name: string): Promise<string> {
+  async read(name: string, unit = ""): Promise<string> {
     await this.ensure();
-    await this.migrateIfNeeded(name);
-    return readFile(this.schPath(name), "utf8");
+    if (!unit) await this.migrateIfNeeded(name);
+    return readFile(this.schPath(name, unit), "utf8");
   }
 
-  async write(name: string, content: string): Promise<void> {
+  async write(name: string, content: string, unit = ""): Promise<void> {
     await this.ensure();
-    await mkdir(this.projectDir(name), { recursive: true });
-    await writeFile(this.schPath(name), content, "utf8");
+    await mkdir(this.projectDir(name, unit), { recursive: true });
+    await writeFile(this.schPath(name, unit), content, "utf8");
   }
 
   // #region project files (firmware, fab output, anything else)
-  async listFiles(name: string, sub = ""): Promise<{ path: string; size: number; updated: number }[]> {
-    const root = join(this.projectDir(name), safeRelative(sub));
+  async listFiles(name: string, sub = "", unit = ""): Promise<{ path: string; size: number; updated: number }[]> {
+    const root = join(this.projectDir(name, unit), safeRelative(sub));
     const out: { path: string; size: number; updated: number }[] = [];
     const walk = async (dir: string, prefix: string) => {
       let entries;
@@ -135,23 +166,23 @@ class Storage {
     return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  async readFile(name: string, rel: string): Promise<string> {
-    return readFile(join(this.projectDir(name), safeRelative(rel)), "utf8");
+  async readFile(name: string, rel: string, unit = ""): Promise<string> {
+    return readFile(join(this.projectDir(name, unit), safeRelative(rel)), "utf8");
   }
 
-  async writeFile(name: string, rel: string, content: string): Promise<void> {
-    const full = join(this.projectDir(name), safeRelative(rel));
+  async writeFile(name: string, rel: string, content: string, unit = ""): Promise<void> {
+    const full = join(this.projectDir(name, unit), safeRelative(rel));
     await mkdir(dirname(full), { recursive: true });
     await writeFile(full, content, "utf8");
   }
 
-  async readBinary(name: string, rel: string): Promise<Uint8Array> {
-    const buf = await readFile(join(this.projectDir(name), safeRelative(rel)));
+  async readBinary(name: string, rel: string, unit = ""): Promise<Uint8Array> {
+    const buf = await readFile(join(this.projectDir(name, unit), safeRelative(rel)));
     return new Uint8Array(buf);
   }
 
-  async deleteFile(name: string, rel: string): Promise<void> {
-    await rm(join(this.projectDir(name), safeRelative(rel)), { force: true });
+  async deleteFile(name: string, rel: string, unit = ""): Promise<void> {
+    await rm(join(this.projectDir(name, unit), safeRelative(rel)), { force: true });
   }
 }
 

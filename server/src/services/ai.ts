@@ -203,6 +203,9 @@ ACTIONS YOU CAN TAKE (put them in "actions", they run in order after your ops ar
 - {"action":"build_firmware"}    compile the firmware in a container.
 - {"action":"run_qemu","seconds":15}   boot the built firmware on an emulated ESP32 and capture its serial output.
 - {"action":"run_spice","probes":["EN"],"stop":0.1}  run ngspice on the current netlist and return the waveforms.
+- {"action":"create_board","name":"remote_estop"}   add another board to this project. It gets its own schematic, PCB and firmware, and shows up in the board selector. Use this when the product needs a second board - a remote e-stop pendant, a sensor head - rather than cramming two boards onto one sheet.
+
+MULTI-BOARD PROJECTS: the PROJECT STATE below lists every board in this project and what is on it. You are editing one of them. When two boards talk to each other - an RF link, a CAN bus, a connector - keep both ends consistent: the same protocol, the same message format, the same pin roles. Say which board you changed.
 
 WRITING FIRMWARE: put whole files in "files", paths relative to the firmware/ folder, e.g. {"path":"src/main.cpp","content":"..."}. Always return the COMPLETE file, never a fragment or a diff. Never write include/board_pins.h - it is generated from the schematic. Keep printing a line containing the word KICK at least four times a second in the main loop: the simulator feeds the board's watchdog from that line, so firmware that stops looping trips the e-stop latch in simulation exactly as it would in hardware.
 

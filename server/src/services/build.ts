@@ -33,9 +33,9 @@ const OFFSETS: Record<string, number> = {
   "firmware.bin": 0x10000,
 };
 
-export async function buildEnvs(project: string): Promise<string[]> {
+export async function buildEnvs(project: string, unit = ""): Promise<string[]> {
   try {
-    const ini = await storage.readFile(project, "firmware/platformio.ini");
+    const ini = await storage.readFile(project, "firmware/platformio.ini", unit);
     return [...ini.matchAll(/^\s*\[env:([^\]]+)\]/gm)].map((m) => m[1].trim());
   } catch {
     return [];
@@ -43,13 +43,13 @@ export async function buildEnvs(project: string): Promise<string[]> {
 }
 
 // Prefer the environment that was actually built most recently.
-async function findArtifacts(project: string, envs: string[]): Promise<{ path: string; offset: number }[]> {
+async function findArtifacts(project: string, envs: string[], unit = ""): Promise<{ path: string; offset: number }[]> {
   for (const env of envs) {
     const found: { path: string; offset: number }[] = [];
     for (const [file, offset] of Object.entries(OFFSETS)) {
       const path = `firmware/.pio/build/${env}/${file}`;
       try {
-        await storage.readBinary(project, path);
+        await storage.readBinary(project, path, unit);
         found.push({ path, offset });
       } catch {
         /* not every env produces every image */
@@ -68,12 +68,12 @@ export function listBuilds(project: string): BuildJob[] {
   return [...jobs.values()].filter((j) => j.project === project).sort((a, b) => b.started - a.started);
 }
 
-export function startBuild(project: string): BuildJob {
+export function startBuild(project: string, unit = ""): BuildJob {
   const id = crypto.randomUUID();
   const job: BuildJob = { id, project, started: Date.now(), state: "running", log: "" };
   jobs.set(id, job);
 
-  const dir = storage.projectDir(project);
+  const dir = storage.projectDir(project, unit);
   const args = [
     "run", "--rm",
     "-v", `${dir}:/workspace`,
@@ -103,8 +103,8 @@ export function startBuild(project: string): BuildJob {
         job.error = `pio run exited ${code}`;
         return;
       }
-      const envs = await buildEnvs(project);
-      const present = await findArtifacts(project, envs);
+      const envs = await buildEnvs(project, unit);
+      const present = await findArtifacts(project, envs, unit);
       job.artifacts = present;
       if (present.length === 0) {
         job.state = "error";

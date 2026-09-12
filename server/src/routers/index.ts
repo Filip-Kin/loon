@@ -45,22 +45,56 @@ function rawOf(footprints: Record<string, { raw?: unknown }>): Record<string, an
 }
 
 
+// A board with two microcontrollers needs two pin maps. With one, keep the
+// name the firmware already includes.
+function headerPath(t: { ref: string }, all: { ref: string }[]): string {
+  return all.length > 1 ? `firmware/include/board_pins_${t.ref}.h` : "firmware/include/board_pins.h";
+}
+
 // #region assistant actions
 // What the buttons used to do, callable from the conversation.
-async function projectState(project: string, schem: Schematic): Promise<string> {
+async function projectState(project: string, schem: Schematic, unit = ""): Promise<string> {
   const lines: string[] = [];
+  // Other boards in the same product, so the assistant can keep a link
+  // protocol consistent across both ends of it.
   try {
-    const files = await storage.listFiles(project, "firmware");
+    const boards = await storage.boards(project);
+    lines.push(`boards in this project: ${boards.map((b) => b || "main").join(", ")}. You are editing ${unit || "main"}.`);
+    for (const b of boards) {
+      if (b === unit) continue;
+      try {
+        const other = parseSchematic(await storage.read(project, b));
+        const defs = (libId: string) => library.get(libId)?.def ?? other.schem.libSymbols[libId];
+        const nl = buildNetlist(other.schem, defs);
+        const mcus = other.schem.symbols.filter((x) => x.libId.includes("ESP32")).map((x) => x.properties.Reference);
+        lines.push(
+          `board "${b || "main"}": ${other.schem.symbols.length} parts, MCU ${mcus.join(",") || "none"}, nets ${nl.nets
+            .map((n) => n.name)
+            .filter((n) => !n.startsWith("N$"))
+            .slice(0, 30)
+            .join(", ")}`,
+        );
+        const fw = await storage.listFiles(project, "firmware", b);
+        if (fw.length) lines.push(`board "${b || "main"}" firmware: ${fw.map((f) => f.path).join(", ")}`);
+      } catch {
+        /* a board that will not parse is not context */
+      }
+    }
+  } catch {
+    /* single board */
+  }
+  try {
+    const files = await storage.listFiles(project, "firmware", unit);
     lines.push(files.length ? `firmware files: ${files.map((f) => f.path).join(", ")}` : "firmware: none yet");
     for (const f of files.filter((x) => /\.(cpp|h|ini)$/.test(x.path)).slice(0, 6)) {
-      const text = await storage.readFile(project, `firmware/${f.path}`);
+      const text = await storage.readFile(project, `firmware/${f.path}`, unit);
       lines.push(`--- firmware/${f.path} ---\n${text.slice(0, 4000)}`);
     }
   } catch {
     lines.push("firmware: none yet");
   }
   try {
-    await storage.readFile(project, "board.loon.json");
+    await storage.readFile(project, "board.loon.json", unit);
     lines.push("board: placed (board.kicad_pcb exists)");
   } catch {
     lines.push("board: not generated yet");
@@ -80,40 +114,40 @@ async function footprintsFor(schem: Schematic): Promise<Record<string, any>> {
   return getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
 }
 
-async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob): Promise<string> {
+async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob, unit = ""): Promise<string> {
   const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
   switch (a.action) {
     case "sync_pins": {
       const targets = firmwareTargets(schem, defs);
       if (targets.length === 0) return "no MCU on the sheet, nothing to map";
+      for (const t of targets) await storage.writeFile(project, headerPath(t, targets), generatePinsHeader(t), unit);
       const t = targets[0];
-      await storage.writeFile(project, "firmware/include/board_pins.h", generatePinsHeader(t));
       const scaffold = async (path: string, text: string) => {
         try {
-          await storage.readFile(project, path);
+          await storage.readFile(project, path, unit);
         } catch {
-          await storage.writeFile(project, path, text);
+          await storage.writeFile(project, path, text, unit);
         }
       };
       await scaffold("firmware/platformio.ini", generatePlatformIni(t));
       await scaffold("firmware/src/main.cpp", generateMainStub(t));
       job.touched!.firmware = true;
-      return `${t.pins.length} pins mapped from ${t.ref}`;
+      return targets.map((x) => `${x.pins.length} pins from ${x.ref}`).join(", ");
     }
     case "generate_board": {
       const footprints = await footprintsFor(schem);
       let existing: Board | undefined;
       if (a.keepPlacement !== false) {
         try {
-          existing = JSON.parse(await storage.readFile(project, "board.loon.json")) as Board;
+          existing = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
         } catch {
           /* first board */
         }
       }
       const res = generateBoard(schem, defs, { rules: OSHPARK_2LAYER, footprints, existing });
-      await storage.writeFile(project, "board.loon.json", JSON.stringify(res.board, null, 2));
-      await storage.writeFile(project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)));
-      await storage.writeFile(project, "board.kicad_pro", serializeProject(res.board, "board"));
+      await storage.writeFile(project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
+      await storage.writeFile(project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)), unit);
+      await storage.writeFile(project, "board.kicad_pro", serializeProject(res.board, "board"), unit);
       job.touched!.board = true;
       const rats = ratsnest(res.board, footprints);
       const notes = [`placed ${res.placed} parts`, ...res.notes, `${rats.length} connections to route`];
@@ -122,7 +156,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
       return notes.join(", ");
     }
     case "run_drc": {
-      const res = await runKicadDrc(project);
+      const res = await runKicadDrc(project, unit);
       job.touched!.board = true;
       if (res.error) return res.error;
       const errors = res.violations.filter((v) => v.severity === "error");
@@ -130,7 +164,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
       return `${errors.length} errors, ${res.violations.length - errors.length} warnings, ${res.unconnected} unrouted`;
     }
     case "build_firmware": {
-      const build = startBuild(project);
+      const build = startBuild(project, unit);
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const j = getBuild(build.id);
@@ -143,7 +177,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
       }
     }
     case "run_qemu": {
-      const sim = startQemu(project, a.seconds ?? 15);
+      const sim = startQemu(project, a.seconds ?? 15, unit);
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const j = getSim(sim.id);
@@ -172,7 +206,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
         probes,
       };
       const deck = buildSpiceDeck(schem, bench, defs);
-      const sim = startSpice(project, deck.text);
+      const sim = startSpice(project, deck.text, unit);
       for (;;) {
         await new Promise((r) => setTimeout(r, 1200));
         const j = getSim(sim.id);
@@ -183,6 +217,13 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
           return series.map((x) => `${x.name} ends at ${(x.points[x.points.length - 1]?.v ?? 0).toFixed(2)}V`).join(", ") || "ran";
         }
       }
+    }
+    case "create_board": {
+      const name = String(a.name ?? "board2").replace(/[^A-Za-z0-9._-]/g, "_");
+      const fresh = emptySchematic(crypto.randomUUID());
+      fresh.title = `${project} - ${name}`;
+      await storage.createBoard(project, name, serializeSchematic(fresh, {}));
+      return `added board "${name}" to this project - switch to it in the board selector to work on it`;
     }
     default:
       throw new Error(`unknown action ${a.action}`);
@@ -215,22 +256,35 @@ const projectRouter = router({
     return { schem };
   }),
 
-  load: publicProcedure.input(z.object({ name: z.string() })).query(async ({ input }) => {
-    const text = await storage.read(input.name);
+  // Boards inside a project: "" is the main board at the project root.
+  boards: publicProcedure.input(z.object({ name: z.string() })).query(({ input }) => storage.boards(input.name)),
+
+  createBoard: publicProcedure
+    .input(z.object({ name: z.string(), board: z.string() }))
+    .mutation(async ({ input }) => {
+      const schem = emptySchematic(crypto.randomUUID());
+      schem.title = `${input.name} - ${input.board}`;
+      await storage.createBoard(input.name, input.board, serializeSchematic(schem, {}));
+      return { schem, boards: await storage.boards(input.name) };
+    }),
+
+  load: publicProcedure.input(z.object({ name: z.string(), board: z.string().optional() })).query(async ({ input }) => {
+    const text = await storage.read(input.name, input.board ?? "");
     const { schem, libRaw } = parseSchematic(text);
-    projectRaw.set(input.name, libRaw);
+    projectRaw.set(`${input.name}/${input.board ?? ""}`, libRaw);
     return { schem };
   }),
 
   save: publicProcedure
-    .input(z.object({ name: z.string(), schem: z.any() }))
+    .input(z.object({ name: z.string(), schem: z.any(), board: z.string().optional() }))
     .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
+      const unit = input.board ?? "";
       const usedLibIds = Array.from(new Set(schem.symbols.map((s) => s.libId)));
-      const cached = projectRaw.get(input.name) ?? {};
+      const cached = projectRaw.get(`${input.name}/${unit}`) ?? {};
       const libRaw: Record<string, SxList> = { ...cached, ...library.rawMap(usedLibIds) };
       const text = serializeSchematic(schem, libRaw);
-      await storage.write(input.name, text);
+      await storage.write(input.name, text, unit);
       const list = await storage.list();
       const meta = list.find((m) => m.name === input.name);
       return { ok: true, meta };
@@ -276,12 +330,13 @@ const aiRouter = router({
   // The one conversation. It edits the schematic, writes firmware, lays out the
   // board and runs the simulators, so the user never has to go find a button.
   start: publicProcedure
-    .input(z.object({ message: z.string(), schem: z.any(), project: z.string().optional() }))
+    .input(z.object({ message: z.string(), schem: z.any(), project: z.string().optional(), board: z.string().optional() }))
     .mutation(({ input }) => {
       reapJobs();
       const id = crypto.randomUUID();
       const schem = input.schem as Schematic;
       const project = input.project ?? "untitled";
+      const unit = input.board ?? "";
       const job: AiJob = { id, started: Date.now(), state: "running", steps: [], files: [], log: "", touched: {} };
       aiJobs.set(id, job);
       (async () => {
@@ -290,7 +345,7 @@ const aiRouter = router({
         };
         try {
           job.message = "Thinking about the whole board...";
-          const state = await projectState(project, schem);
+          const state = await projectState(project, schem, unit);
           const ai = await generateOps(input.message, schem, state);
           const { results } = applyOps(schem, ai.ops, makeResolver(schem));
           job.ops = ai.ops;
@@ -301,7 +356,7 @@ const aiRouter = router({
           // Firmware files first: a later build should compile what was written.
           for (const f of ai.files) {
             if (f.path.includes("board_pins.h")) continue; // generated, never authored
-            await storage.writeFile(project, `firmware/${f.path}`, f.content);
+            await storage.writeFile(project, `firmware/${f.path}`, f.content, unit);
             job.files!.push(f.path);
             job.touched!.firmware = true;
           }
@@ -311,7 +366,7 @@ const aiRouter = router({
           for (const a of ai.actions) {
             job.message = `Running ${a.action.replace(/_/g, " ")}...`;
             try {
-              const detail = await runAiAction(a, project, schem, job);
+              const detail = await runAiAction(a, project, schem, job, unit);
               step(a.action.replace(/_/g, " "), true, detail);
             } catch (e: any) {
               step(a.action.replace(/_/g, " "), false, String(e?.message ?? e));
@@ -386,50 +441,51 @@ const designRouter = router({
 // The board's own pinout generates the header, so firmware never retypes it.
 const firmwareRouter = router({
   files: publicProcedure
-    .input(z.object({ project: z.string() }))
-    .query(({ input }) => storage.listFiles(input.project, "firmware")),
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .query(({ input }) => storage.listFiles(input.project, "firmware", input.board ?? "")),
 
   read: publicProcedure
-    .input(z.object({ project: z.string(), path: z.string() }))
-    .query(async ({ input }) => ({ text: await storage.readFile(input.project, `firmware/${input.path}`) })),
+    .input(z.object({ project: z.string(), path: z.string(), board: z.string().optional() }))
+    .query(async ({ input }) => ({ text: await storage.readFile(input.project, `firmware/${input.path}`, input.board ?? "") })),
 
   write: publicProcedure
-    .input(z.object({ project: z.string(), path: z.string(), text: z.string() }))
+    .input(z.object({ project: z.string(), path: z.string(), text: z.string(), board: z.string().optional() }))
     .mutation(async ({ input }) => {
-      await storage.writeFile(input.project, `firmware/${input.path}`, input.text);
+      await storage.writeFile(input.project, `firmware/${input.path}`, input.text, input.board ?? "");
       return { ok: true };
     }),
 
   // Regenerate the pin header from the current sheet, and scaffold the project
   // the first time. Only board_pins.h is ever overwritten.
   sync: publicProcedure
-    .input(z.object({ project: z.string(), schem: z.any() }))
+    .input(z.object({ project: z.string(), schem: z.any(), board: z.string().optional() }))
     .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
       const targets = firmwareTargets(schem, defs);
       if (targets.length === 0) return { ok: false, message: "No MCU on the sheet to generate a pin map from." };
       const target = targets[0];
-      await storage.writeFile(input.project, "firmware/include/board_pins.h", generatePinsHeader(target));
+      const unit = input.board ?? "";
+      for (const t of targets) await storage.writeFile(input.project, headerPath(t, targets), generatePinsHeader(t), unit);
       const scaffold = async (path: string, text: string) => {
         try {
-          await storage.readFile(input.project, path);
+          await storage.readFile(input.project, path, unit);
         } catch {
-          await storage.writeFile(input.project, path, text);
+          await storage.writeFile(input.project, path, text, unit);
         }
       };
       await scaffold("firmware/platformio.ini", generatePlatformIni(target));
       await scaffold("firmware/src/main.cpp", generateMainStub(target));
       return {
         ok: true,
-        message: `${target.pins.length} pins mapped from ${target.ref} (${target.profile.name}).`,
+        message: targets.map((t) => `${t.pins.length} pins from ${t.ref} (${t.profile.name})`).join("; "),
         pins: target.pins,
       };
     }),
 
   build: publicProcedure
-    .input(z.object({ project: z.string() }))
-    .mutation(({ input }) => ({ id: startBuild(input.project).id })),
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .mutation(({ input }) => ({ id: startBuild(input.project, input.board ?? "").id })),
 
   buildStatus: publicProcedure
     .input(z.object({ id: z.string() }))
@@ -442,7 +498,7 @@ const firmwareRouter = router({
   // The assistant writes firmware as a job too: it takes as long as a design
   // edit, and writes whole files rather than ops.
   aiStart: publicProcedure
-    .input(z.object({ project: z.string(), message: z.string(), schem: z.any() }))
+    .input(z.object({ project: z.string(), message: z.string(), schem: z.any(), board: z.string().optional() }))
     .mutation(({ input }) => {
       reapJobs();
       const id = crypto.randomUUID();
@@ -450,18 +506,19 @@ const firmwareRouter = router({
       aiJobs.set(id, job);
       (async () => {
         try {
-          const files = await storage.listFiles(input.project, "firmware");
+          const unit = input.board ?? "";
+          const files = await storage.listFiles(input.project, "firmware", unit);
           const existing = await Promise.all(
             files
               .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
               .slice(0, 20)
-              .map(async (f) => ({ path: f.path, content: await storage.readFile(input.project, `firmware/${f.path}`) })),
+              .map(async (f) => ({ path: f.path, content: await storage.readFile(input.project, `firmware/${f.path}`, unit) })),
           );
           const res = await generateFirmware(input.message, input.schem as Schematic, existing);
           const written: string[] = [];
           for (const f of res.files) {
             if (f.path.includes("board_pins.h")) continue; // generated, never authored
-            await storage.writeFile(input.project, `firmware/${f.path}`, f.content);
+            await storage.writeFile(input.project, `firmware/${f.path}`, f.content, unit);
             written.push(f.path);
           }
           job.message = `${res.message}${written.length ? ` (wrote ${written.join(", ")})` : ""}`;
@@ -476,7 +533,7 @@ const firmwareRouter = router({
     }),
 
   builds: publicProcedure
-    .input(z.object({ project: z.string() }))
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
     .query(({ input }) => listBuilds(input.project).map((b) => ({ id: b.id, state: b.state, started: b.started }))),
 });
 
@@ -501,7 +558,7 @@ const pcbRouter = router({
     }),
 
   generate: publicProcedure
-    .input(z.object({ project: z.string(), schem: z.any(), layers: z.number().optional(), keepPlacement: z.boolean().optional() }))
+    .input(z.object({ project: z.string(), schem: z.any(), layers: z.number().optional(), keepPlacement: z.boolean().optional(), board: z.string().optional() }))
     .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
@@ -512,10 +569,11 @@ const pcbRouter = router({
         specs.set(fp, defs(s.libId)?.pins.length ?? 2);
       }
       const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
+      const unit = input.board ?? "";
       let existing: Board | undefined;
       if (input.keepPlacement) {
         try {
-          existing = JSON.parse(await storage.readFile(input.project, "board.loon.json")) as Board;
+          existing = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
         } catch {
           /* first board */
         }
@@ -525,24 +583,24 @@ const pcbRouter = router({
         footprints,
         existing,
       });
-      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2));
-      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)));
-      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"));
+      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
+      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)), unit);
+      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"), unit);
       return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes: res.notes };
     }),
 
   load: publicProcedure
-    .input(z.object({ project: z.string() }))
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
     .query(async ({ input }) => {
       try {
-        return { board: JSON.parse(await storage.readFile(input.project, "board.loon.json")) as Board };
+        return { board: JSON.parse(await storage.readFile(input.project, "board.loon.json", input.board ?? "")) as Board };
       } catch {
         return { board: null };
       }
     }),
 
   save: publicProcedure
-    .input(z.object({ project: z.string(), board: z.any(), schem: z.any() }))
+    .input(z.object({ project: z.string(), board: z.any(), schem: z.any(), unit: z.string().optional() }))
     .mutation(async ({ input }) => {
       const board = input.board as Board;
       const schem = input.schem as Schematic;
@@ -554,9 +612,10 @@ const pcbRouter = router({
         if (fp) specs.set(fp, defs(s.libId)?.pins.length ?? 2);
       }
       const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
-      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(board, null, 2));
-      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)));
-      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"));
+      const unit = input.unit ?? "";
+      await storage.writeFile(input.project, "board.loon.json", JSON.stringify(board, null, 2), unit);
+      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)), unit);
+      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"), unit);
       const rats = ratsnest(board, footprints);
       const drc = runDrc(board, footprints, rats.length);
       return { ok: true, drc, unrouted: rats.length };
@@ -564,8 +623,8 @@ const pcbRouter = router({
 
   // KiCad's own DRC on the saved board: slower, and the one that counts.
   kicadDrc: publicProcedure
-    .input(z.object({ project: z.string() }))
-    .mutation(({ input }) => runKicadDrc(input.project)),
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .mutation(({ input }) => runKicadDrc(input.project, input.board ?? "")),
 
   check: publicProcedure
     .input(z.object({ board: z.any() }))
@@ -589,18 +648,18 @@ const simRouter = router({
     }),
 
   spice: publicProcedure
-    .input(z.object({ project: z.string(), schem: z.any(), bench: z.any() }))
+    .input(z.object({ project: z.string(), schem: z.any(), bench: z.any(), board: z.string().optional() }))
     .mutation(({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
       const deck = buildSpiceDeck(schem, input.bench as SpiceBench, defs);
-      const job = startSpice(input.project, deck.text);
+      const job = startSpice(input.project, deck.text, input.board ?? "");
       return { id: job.id, unmodelled: deck.unmodelled, deck: deck.text };
     }),
 
   qemu: publicProcedure
-    .input(z.object({ project: z.string(), seconds: z.number().optional() }))
-    .mutation(({ input }) => ({ id: startQemu(input.project, input.seconds ?? 12).id })),
+    .input(z.object({ project: z.string(), seconds: z.number().optional(), board: z.string().optional() }))
+    .mutation(({ input }) => ({ id: startQemu(input.project, input.seconds ?? 12, input.board ?? "").id })),
 
   status: publicProcedure
     .input(z.object({ id: z.string(), probes: z.array(z.string()).optional() }))

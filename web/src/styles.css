@@ -104,6 +104,8 @@ svg.canvas.panning { cursor: grabbing; }
 
 .part-row .price { float: right; color: var(--text-faint); font-weight: 400; font-size: 12px; }
 
+.boardpick { max-width: 170px; }
+
 .viewswitch { display: flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; }
 .viewswitch button { border: 0; border-radius: 0; background: transparent; padding: 5px 10px; }
 .viewswitch button.on { background: var(--accent, #7c3aed); color: #fff; }

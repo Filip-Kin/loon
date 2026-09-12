@@ -23,8 +23,8 @@ export interface KicadDrcResult {
   error?: string;
 }
 
-export async function runKicadDrc(project: string): Promise<KicadDrcResult> {
-  const dir = storage.projectDir(project);
+export async function runKicadDrc(project: string, unit = ""): Promise<KicadDrcResult> {
+  const dir = storage.projectDir(project, unit);
   const args = [
     "run", "--rm",
     "-v", `${dir}:/work`,
@@ -39,7 +39,7 @@ export async function runKicadDrc(project: string): Promise<KicadDrcResult> {
 
   let report: any;
   try {
-    report = JSON.parse(await storage.readFile(project, "drc.json"));
+    report = JSON.parse(await storage.readFile(project, "drc.json", unit));
   } catch {
     return { ok: false, violations: [], unconnected: 0, raw: out + err, error: "KiCad could not load the board." };
   }
@@ -59,6 +59,6 @@ export async function runKicadDrc(project: string): Promise<KicadDrcResult> {
   collect(report.schematic_parity, "warning");
   const unconnected = (report.unconnected_items ?? []).length;
 
-  await storage.deleteFile(project, "drc.json");
+  await storage.deleteFile(project, "drc.json", unit);
   return { ok: violations.filter((v) => v.severity === "error").length === 0, violations, unconnected, raw: out + err };
 }

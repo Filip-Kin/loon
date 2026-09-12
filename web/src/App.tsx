@@ -25,6 +25,9 @@ export function App() {
   const [schem, setSchem] = useState<Schematic | null>(null);
   const [projectName, setProjectName] = useState<string>("untitled");
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  // A project can hold more than one board: "" is the main board at its root.
+  const [boards, setBoards] = useState<string[]>([""]);
+  const [boardName, setBoardName] = useState<string>("");
   const [selection, setSelection] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const [placingLibId, setPlacingLibId] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export function App() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saving = useRef(false);
   const pendingSave = useRef(false);
-  const latest = useRef<{ name: string; schem: Schematic | null }>({ name: "untitled", schem: null });
+  const latest = useRef<{ name: string; schem: Schematic | null; board: string }>({ name: "untitled", schem: null, board: "" });
 
   const resolver = useMemo(() => makeClientResolver(defs, parts), [defs, parts]);
   const renderDefs = useMemo(() => ({ ...defs, ...(schem?.libSymbols ?? {}) }), [defs, schem]);
@@ -135,14 +138,28 @@ export function App() {
     setProjects(await trpc.project.list.query());
   }
 
-  async function openProject(name: string) {
-    const res = await trpc.project.load.query({ name });
+  async function openProject(name: string, board = "") {
+    const res = await trpc.project.load.query({ name, board });
     past.current = []; future.current = [];
     skipAutosave.current = true;
     setSaveState("saved");
     localStorage.setItem("loon.lastProject", name);
     setSchem(res.schem);
     setProjectName(name);
+    setBoardName(board);
+    setSelection(null);
+    setBoards(await trpc.project.boards.query({ name }));
+  }
+
+  // Add a board to this product: same shape as the main one, its own firmware.
+  async function newBoard(board: string) {
+    const res = await trpc.project.createBoard.mutate({ name: projectName, board });
+    setBoards(res.boards);
+    past.current = []; future.current = [];
+    skipAutosave.current = true;
+    setSaveState("saved");
+    setSchem(res.schem as Schematic);
+    setBoardName(board);
     setSelection(null);
   }
 
@@ -151,7 +168,7 @@ export function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     try {
       setSaveState("saving");
-      await trpc.project.save.mutate({ name: projectName, schem });
+      await trpc.project.save.mutate({ name: projectName, schem, board: boardName });
       setSavedAt(Date.now());
       setSaveState("saved");
       setProjects(await trpc.project.list.query());
@@ -172,7 +189,7 @@ export function App() {
     const started = Date.now();
     const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const { id } = await trpc.ai.start.mutate({ message: text, schem, project: projectName });
+      const { id } = await trpc.ai.start.mutate({ message: text, schem, project: projectName, board: boardName });
       let res: any = null;
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
@@ -238,23 +255,23 @@ export function App() {
   // AI ops and undo/redo alike. Debounced, because dragging a symbol produces a
   // new schematic on every mouse move.
   useEffect(() => {
-    latest.current = { name: projectName, schem };
+    latest.current = { name: projectName, schem, board: boardName };
     if (!schem) return;
     if (skipAutosave.current) { skipAutosave.current = false; return; }
     setSaveState("dirty");
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { autosave(); }, 900);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [schem, projectName]);
+  }, [schem, projectName, boardName]);
 
   async function autosave() {
-    const { name, schem: cur } = latest.current;
+    const { name, schem: cur, board } = latest.current;
     if (!cur) return;
     if (saving.current) { pendingSave.current = true; return; }
     saving.current = true;
     setSaveState("saving");
     try {
-      await trpc.project.save.mutate({ name, schem: cur });
+      await trpc.project.save.mutate({ name, schem: cur, board });
       setSavedAt(Date.now());
       setSaveState(pendingSave.current ? "dirty" : "saved");
     } catch (e: any) {
@@ -273,7 +290,7 @@ export function App() {
       if (saveState === "saved" || !latest.current.schem) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       // Batch-link wire format: ?batch=1 with the inputs keyed by index.
-      const body = JSON.stringify({ 0: { name: latest.current.name, schem: latest.current.schem } });
+      const body = JSON.stringify({ 0: { name: latest.current.name, schem: latest.current.schem, board: latest.current.board } });
       fetch("/trpc/project.save?batch=1", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => {});
     }
     function onHide() { if (document.visibilityState === "hidden") flush(); }
@@ -331,6 +348,22 @@ export function App() {
           {!projects.find((p) => p.name === projectName) && <option value={projectName}>{projectName}</option>}
         </select>
         <button onClick={() => { const n = prompt("New project name", "untitled"); if (n) newProject(n); }}>New</button>
+        <select
+          className="boardpick"
+          value={boardName}
+          onChange={(e) => {
+            if (e.target.value === "__new") {
+              const n = prompt("Name for the new board in this project", "remote_estop");
+              if (n) newBoard(n.replace(/[^A-Za-z0-9._-]/g, "_"));
+              return;
+            }
+            openProject(projectName, e.target.value);
+          }}
+          title="Boards in this project"
+        >
+          {boards.map((b) => <option key={b} value={b}>{b || "main board"}</option>)}
+          <option value="__new">+ add board...</option>
+        </select>
         <button onClick={save}>Save</button>
         <span className={"savestate " + saveState} title={savedAt ? `Last saved ${new Date(savedAt).toLocaleTimeString()}` : "Not saved yet"}>
           {saveState === "saving" ? "Saving..." : saveState === "dirty" ? "Unsaved" : saveState === "error" ? "Save failed" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved"}
@@ -356,9 +389,9 @@ export function App() {
         <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />
 
         <div className="canvas-wrap">
-          {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} rev={firmwareRev} />}
-          {view === "pcb" && <PcbCanvas project={projectName} schem={schem} flash={flash} rev={boardRev} />}
-          {view === "sim" && <SimView project={projectName} schem={schem} defs={renderDefs} flash={flash} />}
+          {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} rev={firmwareRev} board={boardName} />}
+          {view === "pcb" && <PcbCanvas project={projectName} schem={schem} flash={flash} rev={boardRev} unit={boardName} />}
+          {view === "sim" && <SimView project={projectName} schem={schem} defs={renderDefs} flash={flash} board={boardName} />}
           {schem && view === "blocks" && (
             <BlockCanvas
               schem={schem}

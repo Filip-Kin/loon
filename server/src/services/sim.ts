@@ -47,12 +47,12 @@ async function pump(job: SimJob, stream: ReadableStream<Uint8Array>) {
   }
 }
 
-export function startSpice(project: string, deck: string): SimJob {
+export function startSpice(project: string, deck: string, unit = ""): SimJob {
   const job = newJob("spice", project);
   (async () => {
     try {
-      await storage.writeFile(project, "sim/bench.cir", deck);
-      const dir = storage.projectDir(project);
+      await storage.writeFile(project, "sim/bench.cir", deck, unit);
+      const dir = storage.projectDir(project, unit);
       const proc = Bun.spawn(
         [DOCKER, "run", "--rm", "-v", `${dir}/sim:/work`, "-w", "/work", SPICE_IMAGE, "ngspice", "-b", "bench.cir"],
         { stdout: "pipe", stderr: "pipe" },
@@ -60,7 +60,7 @@ export function startSpice(project: string, deck: string): SimJob {
       await Promise.all([pump(job, proc.stdout), pump(job, proc.stderr)]);
       const code = await proc.exited;
       try {
-        job.data = await storage.readFile(project, "sim/out.csv");
+        job.data = await storage.readFile(project, "sim/out.csv", unit);
       } catch {
         /* an analysis with no probes writes nothing */
       }
@@ -80,24 +80,24 @@ export function startSpice(project: string, deck: string): SimJob {
 
 // Merge the PlatformIO artifacts into one flash image, then boot it in QEMU.
 // Serial output comes back on stdout, which is what the firmware prints.
-export function startQemu(project: string, seconds = 12): SimJob {
+export function startQemu(project: string, seconds = 12, unit = ""): SimJob {
   const job = newJob("qemu", project);
   (async () => {
     try {
-      const dir = storage.projectDir(project);
+      const dir = storage.projectDir(project, unit);
       // esptool will not create the output directory, and a first run has no
       // sim/ folder yet.
-      await storage.writeFile(project, "sim/.keep", "");
+      await storage.writeFile(project, "sim/.keep", "", unit);
 
       // Build the UART variant: the emulator has no USB peripheral, so the
       // normal build would boot and then appear silent. If the project has no
       // sim environment - because its platformio.ini was written by hand or by
       // the assistant - append one rather than overwriting what is there.
-      let envs = await buildEnvs(project);
+      let envs = await buildEnvs(project, unit);
       if (!envs.includes("sim")) {
         let ini = "";
         try {
-          ini = await storage.readFile(project, "firmware/platformio.ini");
+          ini = await storage.readFile(project, "firmware/platformio.ini", unit);
         } catch {
           /* no ini yet */
         }
@@ -112,8 +112,8 @@ export function startQemu(project: string, seconds = 12): SimJob {
           "monitor_speed = 115200",
           "",
         ].join("\n");
-        await storage.writeFile(project, "firmware/platformio.ini", ini);
-        envs = await buildEnvs(project);
+        await storage.writeFile(project, "firmware/platformio.ini", ini, unit);
+        envs = await buildEnvs(project, unit);
       }
       const build = Bun.spawn(
         [DOCKER, "run", "--rm", "-v", `${dir}:/workspace`, "-v", `${process.env.LOON_PIO_VOLUME ?? "loon-platformio"}:/root/.platformio`, "-w", "/workspace/firmware", PIO_IMAGE, "pio", "run", "-e", "sim"],

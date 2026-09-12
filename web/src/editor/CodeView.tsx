@@ -11,6 +11,8 @@ interface Props {
   project: string;
   schem: Schematic | null;
   flash: (text: string, err?: boolean) => void;
+  // Which board in the project this view is showing.
+  board?: string;
   // Bumped by the assistant when it writes or builds firmware.
   rev?: number;
 }
@@ -20,7 +22,7 @@ interface FileMeta { path: string; size: number; updated: number }
 // The code view: files on the left, editor in the middle, and the two buttons
 // that matter - build in a container on the server, then flash over USB from
 // the browser. The pin header is generated from the schematic, never typed.
-export function CodeView({ project, schem, flash, rev }: Props) {
+export function CodeView({ project, schem, flash, rev, board }: Props) {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -38,7 +40,7 @@ export function CodeView({ project, schem, flash, rev }: Props) {
 
   async function refreshFiles() {
     try {
-      const list = await trpc.firmware.files.query({ project });
+      const list = await trpc.firmware.files.query({ project, board });
       setFiles(list);
       if (!path && list.length) openFile(list.find((f) => f.path.endsWith("main.cpp"))?.path ?? list[0].path);
       return list;
@@ -55,11 +57,11 @@ export function CodeView({ project, schem, flash, rev }: Props) {
       const list = await refreshFiles();
       if (list.length === 0 && schem && schem.symbols.length > 0) await sync();
     })();
-  }, [project, schem, rev]);
+  }, [project, schem, rev, board]);
 
   async function openFile(p: string) {
     try {
-      const { text } = await trpc.firmware.read.query({ project, path: p });
+      const { text } = await trpc.firmware.read.query({ project, path: p, board });
       setPath(p);
       setDirty(false);
       if (viewRef.current) {
@@ -91,7 +93,7 @@ export function CodeView({ project, schem, flash, rev }: Props) {
 
   async function save() {
     if (!path || !viewRef.current) return;
-    await trpc.firmware.write.mutate({ project, path, text: viewRef.current.state.doc.toString() });
+    await trpc.firmware.write.mutate({ project, path, text: viewRef.current.state.doc.toString(), board });
     setDirty(false);
     flash(`Saved ${path}`);
   }
@@ -101,7 +103,7 @@ export function CodeView({ project, schem, flash, rev }: Props) {
     if (!schem) return;
     setBusy("sync");
     try {
-      const res = await trpc.firmware.sync.mutate({ project, schem });
+      const res = await trpc.firmware.sync.mutate({ project, schem, board });
       flash(res.message ?? "Synced");
       await refreshFiles();
       if (path) await openFile(path);
@@ -117,7 +119,7 @@ export function CodeView({ project, schem, flash, rev }: Props) {
     setLog("");
     setArtifacts(null);
     try {
-      const { id } = await trpc.firmware.build.mutate({ project });
+      const { id } = await trpc.firmware.build.mutate({ project, board });
       for (;;) {
         await new Promise((r) => setTimeout(r, 1200));
         const st: any = await trpc.firmware.buildStatus.query({ id });
@@ -157,7 +159,7 @@ export function CodeView({ project, schem, flash, rev }: Props) {
     setAskLog("Working...");
     setAsk("");
     try {
-      const { id } = await trpc.firmware.aiStart.mutate({ project, message: text, schem });
+      const { id } = await trpc.firmware.aiStart.mutate({ project, message: text, schem, board });
       for (;;) {
         await new Promise((r) => setTimeout(r, 1500));
         const st: any = await trpc.ai.status.query({ id });
