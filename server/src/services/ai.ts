@@ -156,7 +156,10 @@ BLOCK-LEVEL OPS (the block view is the same document, grouped by module):
 - {"op":"move_block","blockId":"...","by":{"dx":40,"dy":0}}
 - {"op":"delete_block","blockId":"..."}
 - {"op":"set_block_params","blockId":"...","params":{"inputs":4}}   (rebuilds the block from its module; hand edits inside it are lost)
-- {"op":"rename_net","from":"ARM","to":"IO21_ARM"}   (joins two nets by name; this is how block ports connect)`;
+- {"op":"rename_net","from":"ARM","to":"IO21_ARM"}   (joins two nets by name; this is how block ports connect)
+- {"op":"delete_net_wires","net":"+24V"}   (deletes every wire on a net and labels its pins with the net name instead. This is the repair when a net has swallowed the board: a wire that crosses a pin connects to it, so one long route can short dozens of parts together. The connection survives; the wire that caused the short does not.)
+
+WIRING RULE: connect_pins only draws a wire when the route is clear of every other pin; otherwise it joins the two pins by name automatically. Do not try to hand-route long distances with add_wire - across a busy sheet that is how a net swallows the board. For anything further than a few parts, use a label.`;
 
 function buildPrompt(userMessage: string, schem: Schematic): string {
   return `You are the schematic design assistant inside Loon, an electronics CAD tool.

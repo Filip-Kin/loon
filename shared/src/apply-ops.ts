@@ -8,6 +8,7 @@ import type { Op, OpResult } from "./ops";
 import { findPin, pinWorld, routeOrthogonal, snapPoint, instanceBBox, PLACE_GRID } from "./geometry";
 import { MODULES, type ModuleNet } from "./modules";
 import { buildIcSymbol } from "./symbolgen";
+import { buildNetlist } from "./netlist";
 
 export interface ResolvedPart {
   def: LibSymbol;
@@ -325,6 +326,27 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
         }
       }
       return n > 0 ? { ok: true } : { ok: false, error: `No net named ${op.from}` };
+    }
+
+    case "delete_net_wires": {
+      const nl = buildNetlist(schem, (libId) => resolve(libId)?.def);
+      const net = nl.nets.find((n) => n.name === op.net);
+      if (!net) return { ok: false, error: `No net named ${op.net}` };
+      const doomed = new Set(
+        Object.entries(nl.netOfWire)
+          .filter(([, name]) => name === op.net)
+          .map(([uuid]) => uuid),
+      );
+      if (doomed.size === 0) return { ok: false, error: `Net ${op.net} has no wires` };
+      // Keep the connection: every pin on the net gets the name it was on.
+      if (op.keepLabels !== false) {
+        for (const p of net.pins) {
+          if (schem.labels.some((l) => l.text === op.net && Math.abs(l.at.x - p.at.x) < 0.05 && Math.abs(l.at.y - p.at.y) < 0.05)) continue;
+          schem.labels.push({ uuid: newUuid(), kind: "local", text: op.net, at: p.at, rotation: 0 });
+        }
+      }
+      schem.wires = schem.wires.filter((w) => !doomed.has(w.uuid));
+      return { ok: true };
     }
 
     case "set_block_params": {
