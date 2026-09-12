@@ -157,20 +157,73 @@ export function autoroute(
       }
       // Entry points: every cell of this pad the net still owns after the
       // conflict pass. A pad that lost all of them stays in the ratsnest.
+      // Entry cells have to sit on the pad's own copper. The stub drawn from the
+      // entry cell back to the pad centre is not clearance checked - it cannot
+      // be, it has to touch the pad - so it must never leave the pad, or it
+      // shaves the pad next door. On a 1.27mm pitch connector that is the
+      // difference between a clean board and a short.
       if (net) {
+        const entries: { cx: number; cy: number; layer: number }[] = [];
         for (let dx = -rx; dx <= rx; dx++) {
           for (let dy = -ry; dy <= ry; dy++) {
             const x = cx + dx;
             const y = cy + dy;
             if (x < 0 || y < 0 || x >= W || y >= H) continue;
+            if (Math.abs(mmX(x) - at.x) > hw || Math.abs(mmY(y) - at.y) > hh) continue;
             for (const layer of layers) {
               const cell = idx(x, y, layer);
               if (owner[cell] !== id) continue;
-              own.push({ cx: x, cy: y, layer });
+              entries.push({ cx: x, cy: y, layer });
               padAnchor.set(cell, { x: at.x, y: at.y });
             }
           }
         }
+        // A pad whose own copper is all spoken for can still be entered from a
+        // cell outside it, as long as the stub back to the pad centre does not
+        // pass anything that belongs to someone else.
+        if (true) {
+          for (let dx = -rx; dx <= rx; dx++) {
+            for (let dy = -ry; dy <= ry; dy++) {
+              const x = cx + dx;
+              const y = cy + dy;
+              if (x < 0 || y < 0 || x >= W || y >= H) continue;
+              for (const layer of layers) {
+                const cell = idx(x, y, layer);
+                if (owner[cell] !== id) continue;
+                const steps = Math.max(Math.abs(dx), Math.abs(dy));
+                let clear = true;
+                for (let k = 1; k <= steps && clear; k++) {
+                  const sx = cx + Math.round((dx * k) / steps);
+                  const sy = cy + Math.round((dy * k) / steps);
+                  // The cell itself and the four it touches: enough to catch a
+                  // stub shaving the pad next door, without rejecting every
+                  // escape route inside a dense footprint.
+                  for (const [ox, oy] of [
+                    [0, 0],
+                    [1, 0],
+                    [-1, 0],
+                    [0, 1],
+                    [0, -1],
+                  ]) {
+                    const nx = sx + ox;
+                    const ny = sy + oy;
+                    if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                    const o = owner[idx(nx, ny, layer)];
+                    if (o !== FREE && o !== id) {
+                      clear = false;
+                      break;
+                    }
+                  }
+                }
+                if (!clear) continue;
+                if (entries.some((e) => e.cx === x && e.cy === y && e.layer === layer)) continue;
+                entries.push({ cx: x, cy: y, layer });
+                padAnchor.set(cell, { x: at.x, y: at.y });
+              }
+            }
+          }
+        }
+        for (const e of entries) own.push(e);
         padCells.set(net, own);
       }
       void r;

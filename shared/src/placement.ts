@@ -228,6 +228,19 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     clusters.push(newCluster(f.ref, [f]));
   }
 
+  // A connector inside a module is still a connector, and the circuit behind it
+  // wants to stay with it: an Ethernet controller 80mm from its jack is four
+  // differential pairs crossing a board full of switching converters. So the
+  // block is re-headed onto its connector and travels to the edge as one piece,
+  // with everything else laid out behind it.
+  for (const c of clusters) {
+    if (c.kind === "terminal" || c.kind === "usb") continue;
+    const conn = c.parts.find((f) => f !== c.head && ["terminal", "usb"].includes(roleOfRef(f.ref)));
+    if (!conn) continue;
+    c.head = conn;
+    c.kind = roleOfRef(conn.ref);
+  }
+
   // #region cluster layout
   // Inside a cluster: the chip in the middle, its parts in columns either side,
   // closest first. Two clusters with the same parts come out identical, which
@@ -442,22 +455,28 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
         near.set(ref, (near.get(ref) ?? 0) + n);
       }
     }
-    const friend = [...near]
-      .sort((a, b) => b[1] - a[1])
-      .map(([ref]) => byRef.get(ref))
-      .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
+    const friend =
+      [...near]
+        .sort((a, b) => b[1] - a[1])
+        .map(([ref]) => byRef.get(ref))
+        .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
     // The right-hand edge is where the logic lives, so a connector whose
     // circuit is in there goes with it. Anything else goes left, by the lugs.
     const onRight =
       !!friend && (rfClusters.some((r) => r.parts.includes(friend)) || digitalZone.some((d) => d.parts.includes(friend)));
     (onRight ? rightConns : leftConns).push(c);
   }
+  // Turn them to face their edge before measuring: a jack laid out flat and
+  // then rotated is a jack whose size the column planned wrong, which is how it
+  // ends up 12mm short of the edge it was supposed to sit on.
   for (const c of rightConns) {
+    c.headRot = faceRotation(fpOf(c.head), { x: 1, y: 0 });
     c.packSide = "left";
     c.layout.clear();
     layoutCluster(c);
   }
   for (const c of leftConns) {
+    c.headRot = faceRotation(fpOf(c.head), { x: -1, y: 0 });
     c.packSide = "right";
     c.layout.clear();
     layoutCluster(c);
@@ -594,8 +613,6 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const colRight = EDGE + contentW;
   let rightY = EDGE + topDepth + ZONE_GAP;
   for (const c of rightMembers) {
-    const rot = faceRotation(fpOf(c.head), { x: 1, y: 0 }, c.headRot ?? 0);
-    if (!rfClusters.includes(c)) c.layout.set(c.head.ref, { ...c.layout.get(c.head.ref)!, rot });
     dropCluster(c, { x: colRight - c.w / 2, y: rightY + c.h / 2 });
     rightY += c.h + ZONE_GAP / 2;
   }
@@ -603,19 +620,30 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   let leftY = lugBottom + ZONE_GAP;
   const leftW = leftConns.length ? Math.max(...leftConns.map((c) => c.w)) : 0;
   for (const c of leftConns) {
-    const rot = faceRotation(fpOf(c.head), { x: -1, y: 0 }, 0);
-    c.layout.set(c.head.ref, { ...c.layout.get(c.head.ref)!, rot });
     dropCluster(c, { x: EDGE + leftW / 2, y: leftY + c.h / 2 });
     leftY += c.h + ZONE_GAP / 2;
   }
 
-  // The board is as wide as what is on it, not as wide as the first guess.
-  const boardW = snap(
-    Math.max(
-      board.footprints.reduce((m, f) => Math.max(m, f.at.x + sizeOf(fpOf(f), f.rotation).w / 2), EDGE) + EDGE,
-      EDGE * 2 + 40,
-    ),
-  );
+  // The board is as wide as what is on it, not as wide as the first guess. A
+  // connector on the right-hand edge gets the edge itself: the face you plug
+  // into belongs at the board outline, not 15mm inside it. Mounting holes sit
+  // relative to the outline, so they do not get a vote on where it is.
+  const edgeFace = new Set<string>();
+  // Connectors and the radio module both want the outline itself: one is a face
+  // you plug into, the other is an antenna that has to look off the board.
+  for (const c of rightMembers) {
+    if (c.kind !== "terminal" && c.kind !== "usb" && !rfClusters.includes(c)) continue;
+    for (const p2 of c.parts) edgeFace.add(p2.ref);
+  }
+  let normalRight = EDGE;
+  let faceRight = 0;
+  for (const f of board.footprints) {
+    if (/^H\d+$/.test(f.ref)) continue;
+    const right = f.at.x + sizeOf(fpOf(f), f.rotation).w / 2;
+    if (edgeFace.has(f.ref)) faceRight = Math.max(faceRight, right);
+    else normalRight = Math.max(normalRight, right);
+  }
+  const boardW = snap(Math.max(normalRight + EDGE, faceRight + 1, EDGE * 2 + 40));
 
   // Bottom edge: the regulated outputs, seated against the real edge rather
   // than a guess made before the middle was laid out. Guessing leaves a 40mm
@@ -754,8 +782,9 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   let maxX = 0;
   let maxY = 0;
   for (const f of board.footprints) {
+    if (/^H\d+$/.test(f.ref)) continue; // holes follow the outline, not the other way round
     const r = rectOf(f);
-    maxX = Math.max(maxX, r.x2);
+    maxX = Math.max(maxX, edgeFace.has(f.ref) ? r.x2 - EDGE + 1 : r.x2);
     maxY = Math.max(maxY, r.y2);
   }
   const outW = Math.max(boardW, snap(maxX + EDGE));
