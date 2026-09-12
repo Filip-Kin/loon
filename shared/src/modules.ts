@@ -28,6 +28,10 @@ export interface ModulePart {
   dx: number;
   dy: number;
   rotation?: number;
+  // Land pattern, when the default for the symbol is wrong. A 3.5A buck's
+  // inductor is not an 0805 and its input cap is not an 0603; leaving those at
+  // the catalog default is how a power stage ends up the size of a signal.
+  footprint?: string;
 }
 
 export interface ModuleWire {
@@ -325,13 +329,13 @@ const modules: ModuleDef[] = [
       return {
         parts: [
           { local: "U", libId: "Regulator_Switching:TPS54360", value: "TPS54360", dx: 0, dy: 0 },
-          { local: "CIN1", libId: "Device:C", value: "2.2u/100V", dx: -30, dy: -6 },
-          { local: "CIN2", libId: "Device:C", value: "2.2u/100V", dx: -22, dy: -6 },
+          { local: "CIN1", libId: "Device:C", value: "2.2u/100V", dx: -30, dy: -6, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CIN2", libId: "Device:C", value: "2.2u/100V", dx: -22, dy: -6, footprint: "Capacitor_SMD:C_1210_3225Metric" },
           { local: "CB", libId: "Device:C", value: "100n", dx: -8, dy: -26 },
-          { local: "L", libId: "Device:L", value: "8.2u", dx: 34, dy: -8 },
-          { local: "D", libId: "Device:D", value: "B560C", dx: 22, dy: 8 },
-          { local: "CO1", libId: "Device:C", value: "47u", dx: 46, dy: 4 },
-          { local: "CO2", libId: "Device:C", value: "47u", dx: 54, dy: 4 },
+          { local: "L", libId: "Device:L", value: "8.2u 5A", dx: 34, dy: -8, footprint: "Inductor_SMD:L_Bourns_SRN6045TA" },
+          { local: "D", libId: "Device:D", value: "B560C", dx: 22, dy: 8, footprint: "Diode_SMD:D_SMA" },
+          { local: "CO1", libId: "Device:C", value: "47u", dx: 46, dy: 4, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO2", libId: "Device:C", value: "47u", dx: 54, dy: 4, footprint: "Capacitor_SMD:C_1210_3225Metric" },
           { local: "RHS", libId: "Device:R", value: nearestE96(rhs), dx: 40, dy: 22 },
           { local: "RLS", libId: "Device:R", value: "10.2k", dx: 40, dy: 34 },
           { local: "RT", libId: "Device:R", value: "523k", dx: -22, dy: 14 },
@@ -695,12 +699,12 @@ const modules: ModuleDef[] = [
           { local: "QL1", libId: "Transistor_FET:Power_NMOS_60V", value: "QL1", dx: 60, dy: -16 },
           { local: "QH2", libId: "Transistor_FET:Power_NMOS_60V", value: "QH2", dx: 100, dy: -40 },
           { local: "QL2", libId: "Transistor_FET:Power_NMOS_60V", value: "QL2", dx: 100, dy: -16 },
-          { local: "L", libId: "Device:L", value: "4.7u", dx: 80, dy: -52 },
+          { local: "L", libId: "Device:L", value: "4.7u 10A", dx: 80, dy: -52, footprint: "Inductor_SMD:L_12x12mm_H6mm" },
           { local: "RSNS", libId: "Device:R", value: "8m 2W", dx: 80, dy: 6 },
-          { local: "CIN1", libId: "Device:C", value: "22u/50V", dx: -40, dy: -30 },
-          { local: "CIN2", libId: "Device:C", value: "22u/50V", dx: -32, dy: -30 },
-          { local: "CO1", libId: "Device:C", value: "47u/50V", dx: 124, dy: 4 },
-          { local: "CO2", libId: "Device:C", value: "47u/50V", dx: 132, dy: 4 },
+          { local: "CIN1", libId: "Device:C", value: "22u/50V", dx: -40, dy: -30, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CIN2", libId: "Device:C", value: "22u/50V", dx: -32, dy: -30, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO1", libId: "Device:C", value: "47u/50V", dx: 124, dy: 4, footprint: "Capacitor_SMD:C_1210_3225Metric" },
+          { local: "CO2", libId: "Device:C", value: "47u/50V", dx: 132, dy: 4, footprint: "Capacitor_SMD:C_1210_3225Metric" },
           { local: "CB1", libId: "Device:C", value: "100n", dx: 44, dy: -52 },
           { local: "CB2", libId: "Device:C", value: "100n", dx: 116, dy: -52 },
           { local: "CVCC", libId: "Device:C", value: "2.2u", dx: 24, dy: 34 },

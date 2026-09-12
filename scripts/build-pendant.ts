@@ -28,6 +28,7 @@ export function buildPendant(): Schematic {
   const schem = emptySchematic(crypto.randomUUID());
   schem.title = "ORA Remote E-Stop Pendant";
   schem.rev = "A";
+  schem.company = "Oakland Robotics Association";
 
   const ops: Op[] = [];
   const pinLabels: { ref: string; pin: string; text: string }[] = [];

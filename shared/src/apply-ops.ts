@@ -459,6 +459,7 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
         const r = applyOp(schem, { op: "add_symbol", libId: part.libId, value: part.value, at: { x: base.x + part.dx, y: base.y + part.dy }, rotation: part.rotation }, resolve);
         if (!r.ok) return { ok: false, error: `module ${op.moduleId}: ${r.error}` };
         const inst = schem.symbols.find((s) => s.uuid === r.createdUuid)!;
+        if (part.footprint) inst.properties.Footprint = part.footprint;
         inst.properties.LoonBlock = blockId;
         inst.properties.LoonModule = op.moduleId;
         inst.properties.LoonBlockPart = part.local;

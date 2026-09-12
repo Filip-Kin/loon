@@ -153,6 +153,29 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
 
   for (const f of board.footprints) root.items.push(emitFootprint(f, rawFootprints[f.libId], netIndex, board.rules.minDrill));
 
+  // Silkscreen text.
+  for (const t of board.texts ?? []) {
+    root.items.push(
+      list(
+        sym("gr_text"),
+        str(t.text),
+        node("at", num(t.at.x), num(t.at.y), num(t.rotation ?? 0)),
+        node("layer", str(t.layer)),
+        node("uuid", str(crypto.randomUUID())),
+        list(
+          sym("effects"),
+          list(
+            sym("font"),
+            node("size", num(t.size), num(t.size)),
+            node("thickness", num(t.thickness ?? Math.max(0.12, t.size * 0.15))),
+            ...(t.bold ? [node("bold", sym("yes"))] : []),
+          ),
+          node("justify", sym("left")),
+        ),
+      ),
+    );
+  }
+
   // Board outline on Edge.Cuts.
   const outline = board.outline;
   for (let k = 0; k < outline.length; k++) {

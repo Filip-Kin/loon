@@ -42,6 +42,7 @@ const CLUSTER_GAP = 0.6; // mm between parts inside one cluster: keep it tight
 const ZONE_GAP = 8; // mm between zones, the gutter that keeps power off logic
 const COL_GAP = 2.5; // mm between two channel columns
 const LUG_GAP = 14; // mm between two studs: a ring terminal and a spanner need it
+const LUG_INSET = 6; // mm further in than everything else: the ring overhangs the stud
 const CRT = 0.3; // courtyards already stand off; this is the hair on top
 
 const snap = (v: number) => Math.round(v / GRID) * GRID;
@@ -89,6 +90,46 @@ function centreOffset(fp: Footprint | undefined, rotation: number): Point {
   return { x: cx * Math.cos(rad) - cy * Math.sin(rad), y: cx * Math.sin(rad) + cy * Math.cos(rad) };
 }
 
+// Which way a part wants to face. A connector's body sits off to one side of
+// its pads - that is the side you plug into - and an RF module's keepout sits
+// over its antenna. Both are the direction that has to point off the board.
+function outwardOf(fp?: Footprint): Point | undefined {
+  if (!fp) return undefined;
+  if (fp.keepouts?.length) {
+    const pts = fp.keepouts.flat();
+    const k = { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
+    if (Math.hypot(k.x, k.y) > 0.5) return k;
+  }
+  if (!fp.pads.length || !fp.courtyard) return undefined;
+  const pc = {
+    x: fp.pads.reduce((s, p) => s + p.at.x, 0) / fp.pads.length,
+    y: fp.pads.reduce((s, p) => s + p.at.y, 0) / fp.pads.length,
+  };
+  const cc = { x: (fp.courtyard.min.x + fp.courtyard.max.x) / 2, y: (fp.courtyard.min.y + fp.courtyard.max.y) / 2 };
+  const v = { x: cc.x - pc.x, y: cc.y - pc.y };
+  return Math.hypot(v.x, v.y) > 0.4 ? v : undefined;
+}
+
+// The rotation that points a part's outward direction at the given edge.
+function faceRotation(fp: Footprint | undefined, normal: Point, fallback = 0): number {
+  const v = outwardOf(fp);
+  if (!v) return fallback;
+  let best = fallback;
+  let bestDot = -Infinity;
+  for (const rot of [0, 90, 180, 270]) {
+    const rad = (-rot * Math.PI) / 180;
+    const rx = v.x * Math.cos(rad) - v.y * Math.sin(rad);
+    const ry = v.x * Math.sin(rad) + v.y * Math.cos(rad);
+    const len = Math.hypot(rx, ry) || 1;
+    const dot = (rx * normal.x + ry * normal.y) / len;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = rot;
+    }
+  }
+  return best;
+}
+
 // Parts that share a net, ranked by how much they share. A rail touches
 // everything, so it says nothing about who belongs with whom.
 function neighbours(ref: string, nl: Netlist): Map<string, number> {
@@ -114,6 +155,13 @@ interface Cluster {
   id: string;
   head: PlacedFootprint;
   kind: Role;
+  // The head may have to be turned - an RF module's antenna has to face off the
+  // board - and everything around it is then laid out against the turned size.
+  headRot?: number;
+  // On a board edge, everything hangs off one side of the head, so the head
+  // itself can sit on the edge. An antenna behind a column of capacitors is
+  // not on the edge.
+  packSide?: "left" | "right";
   parts: PlacedFootprint[];
   // Offsets from the cluster's own centre, filled by layoutCluster.
   layout: Map<string, { dx: number; dy: number; rot: number }>;
@@ -123,7 +171,13 @@ interface Cluster {
 
 const HEAD_RANK: Role[] = ["mcu", "converter", "rf", "logic", "switch", "usb", "terminal", "fuse", "button", "other", "passive", "lug"];
 
-export function autoPlace(board: Board, footprints: Record<string, Footprint>, nl: Netlist): PlacementResult {
+export interface PlaceOptions {
+  title?: string;
+  rev?: string;
+  org?: string;
+}
+
+export function autoPlace(board: Board, footprints: Record<string, Footprint>, nl: Netlist, opts: PlaceOptions = {}): PlacementResult {
   const notes: string[] = [];
   const byRef = new Map(board.footprints.map((f) => [f.ref, f]));
   const fpOf = (f: PlacedFootprint) => footprints[f.libId];
@@ -177,8 +231,8 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   // closest first. Two clusters with the same parts come out identical, which
   // is what makes eight channels look like eight channels.
   const layoutCluster = (c: Cluster) => {
-    const headSize = sizeOf(fpOf(c.head));
-    c.layout.set(c.head.ref, { dx: 0, dy: 0, rot: 0 });
+    const headSize = sizeOf(fpOf(c.head), c.headRot ?? 0);
+    c.layout.set(c.head.ref, { dx: 0, dy: 0, rot: c.headRot ?? 0 });
     const near = neighbours(c.head.ref, nl);
     const rest = c.parts
       .filter((p) => p.ref !== c.head.ref)
@@ -220,7 +274,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     cols.forEach((column, i) => {
       const colW = Math.max(...column.map((p) => sizeOf(fpOf(p)).w));
       const colHeight = column.reduce((s, p) => s + sizeOf(fpOf(p)).h + CLUSTER_GAP, -CLUSTER_GAP);
-      const left = i % 2 === 0;
+      const left = c.packSide ? c.packSide === "left" : i % 2 === 0;
       const cx = left ? leftX - CLUSTER_GAP - colW / 2 : rightX + CLUSTER_GAP + colW / 2;
       if (left) leftX = cx - colW / 2;
       else rightX = cx + colW / 2;
@@ -353,8 +407,59 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   // signal connector: an e-stop header in the middle of the board is a header
   // you cannot reach.
   const edgeConnectors = middle.filter((c) => c.kind === "terminal" || c.kind === "usb");
-  const digitalZone = middle.filter((c) => !edgeConnectors.includes(c) && ["mcu", "logic", "button", "rf"].includes(c.kind));
+  // A radio module lives on the right-hand edge, not in the middle band. Laying
+  // it out twice leaves a hole where it used to be and widens the board.
+  const rfClusters = middle.filter((c) => (c.kind === "mcu" || c.kind === "rf") && outwardOf(fpOf(c.head)));
+  const digitalZone = middle.filter(
+    (c) => !edgeConnectors.includes(c) && !rfClusters.includes(c) && ["mcu", "logic", "button", "rf"].includes(c.kind),
+  );
   const otherZone = middle.filter((c) => !powerZone.includes(c) && !digitalZone.includes(c) && !edgeConnectors.includes(c));
+
+  // #region right column
+  // The right-hand edge is a column: the radio module at the top with its
+  // antenna looking off the board, then the connectors that serve the logic.
+  // Deciding this before the middle band is laid out is what keeps the column
+  // from widening the board once everything else is already down.
+  for (const c of rfClusters) {
+    c.headRot = faceRotation(fpOf(c.head), { x: 1, y: 0 });
+    c.packSide = "left";
+    c.layout.clear();
+    layoutCluster(c);
+  }
+
+  // A connector goes on the edge nearest the circuit it serves. Ask the whole
+  // cluster, not just the connector: a USB port reaches the MCU through its own
+  // ESD part, so the connector's own net list says nothing useful.
+  const rightConns: Cluster[] = [];
+  const leftConns: Cluster[] = [];
+  for (const c of edgeConnectors) {
+    const near = new Map<string, number>();
+    for (const p of c.parts) {
+      for (const [ref, n] of neighbours(p.ref, nl)) {
+        if (c.parts.some((q) => q.ref === ref)) continue;
+        near.set(ref, (near.get(ref) ?? 0) + n);
+      }
+    }
+    const friend = [...near]
+      .sort((a, b) => b[1] - a[1])
+      .map(([ref]) => byRef.get(ref))
+      .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
+    const onRight = !!friend && rfClusters.some((r) => r.parts.includes(friend));
+    (onRight ? rightConns : leftConns).push(c);
+  }
+  for (const c of rightConns) {
+    c.packSide = "left";
+    c.layout.clear();
+    layoutCluster(c);
+  }
+  for (const c of leftConns) {
+    c.packSide = "right";
+    c.layout.clear();
+    layoutCluster(c);
+  }
+  const rightMembers = [...rfClusters, ...rightConns];
+  const colW = rightMembers.length ? Math.max(...rightMembers.map((c) => c.w)) : 0;
+  const colZoneW = colW ? colW + ZONE_GAP : 0;
 
   const rowsOf = (list: Cluster[], maxW: number) => {
     const rows: Cluster[][] = [];
@@ -380,7 +485,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   // Width: the channel bank sets it, unless the middle zones need more. The
   // lugs take a column of their own at the input end.
   const lugW = lugs.length ? Math.max(...lugs.map((l) => sizeOf(fpOf(l)).w)) : 0;
-  const lugZoneW = lugs.length ? lugW + ZONE_GAP : 0;
+  const lugZoneW = lugs.length ? lugW + LUG_INSET + ZONE_GAP : 0;
   const colPitch = columns.length ? Math.max(...columns.map((c) => c.w)) + COL_GAP : 0;
   const railPitch = railColumns.length ? Math.max(...railColumns.map((c) => c.w)) + COL_GAP : 0;
   const bankW = columns.length * colPitch;
@@ -391,20 +496,26 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const powerW = powerZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
   const digitalW = digitalZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
   const otherW = otherZone.reduce((s, c) => s + c.w + ZONE_GAP / 2, 0);
-  // A small board is allowed to be small. Inflating the width to a fixed floor
-  // is how a pendant with 37 parts came out 158mm wide.
-  // Side by side normally. With no channel bank to set the width, two wide
-  // zones sharing a row make a board that is all width and no height, so they
-  // stack instead.
-  const stacked = !allColumns.length && powerW > 0 && digitalW > 0 && powerW + digitalW > 80;
-  const midW = (stacked ? Math.max(powerW, digitalW) : powerW + (powerW && digitalW ? ZONE_GAP : 0) + digitalW) + (otherW ? ZONE_GAP + otherW / 2 : 0);
-  const contentW = Math.max(bankW, railBankW + lugZoneW, midW * 0.8, 40);
 
-  const powerRows = rowsOf(powerZone, Math.max(contentW * 0.5, 35));
-  const digitalRows = rowsOf(digitalZone, Math.max(contentW * 0.45, 35));
-  const otherRows = rowsOf(otherZone, contentW);
+  // The channel bank sets the width of a board that has one. The middle band
+  // then wraps to fit inside it, beside the right-hand column, instead of
+  // setting its own width and pushing everything else outward.
+  // With no bank, two wide zones sharing a row make a board that is all width
+  // and no height, so they stack instead.
+  // Power above logic, using the full width, whenever the right-hand edge is
+  // already spoken for. Splitting the remaining width between two zones makes
+  // both of them wrap, and a board that wraps twice is a tall empty board.
+  const stacked = powerW > 0 && digitalW > 0 && (colZoneW > 0 || (!allColumns.length && powerW + digitalW > 80));
+  const looseW = (stacked ? Math.max(powerW, digitalW) : powerW + (powerW && digitalW ? ZONE_GAP : 0) + digitalW) + (otherW ? ZONE_GAP + otherW / 2 : 0);
+  const midTarget = bankW ? Math.max(bankW - colZoneW, 80) : Math.max(looseW * 0.8, 40);
+
+  const powerRows = rowsOf(powerZone, stacked ? midTarget : Math.max(midTarget * 0.55, 35));
+  const digitalRows = rowsOf(digitalZone, stacked ? midTarget : Math.max(midTarget * 0.45, 35));
   const powerSize = sizeRows(powerRows);
   const digitalSize = sizeRows(digitalRows);
+  const midUsed = stacked ? Math.max(powerSize.w, digitalSize.w) : powerSize.w + (powerSize.w && digitalSize.w ? ZONE_GAP : 0) + digitalSize.w;
+  const contentW = Math.max(bankW, railBankW + lugZoneW, midUsed + colZoneW, colZoneW + 40, 40);
+  const otherRows = rowsOf(otherZone, Math.max(contentW - colZoneW, 40));
   const otherSize = sizeRows(otherRows);
 
   const topDepth = columns.length ? Math.max(...columns.map((c) => c.h)) : 0;
@@ -422,8 +533,9 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   columns.forEach((c, i) => {
     const x = bankX + i * colPitch + colPitch / 2;
     let y = EDGE;
-    const th = sizeOf(fpOf(c.terminal)).h;
-    place(c.terminal, { x, y: y + th / 2 }, 0);
+    const trot = faceRotation(fpOf(c.terminal), { x: 0, y: -1 }, 0);
+    const th = sizeOf(fpOf(c.terminal), trot).h;
+    place(c.terminal, { x, y: y + th / 2 }, trot);
     y += th + CLUSTER_GAP * 2;
     if (c.fuse) {
       const fh = sizeOf(fpOf(c.fuse), 90).h;
@@ -438,7 +550,7 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const lugTop = EDGE + topDepth + ZONE_GAP;
   const lugPitch = Math.max(...lugs.map((l) => sizeOf(fpOf(l)).h), 6) + LUG_GAP;
   lugs.forEach((l, i) => {
-    place(l, { x: EDGE + lugW / 2, y: lugTop + sizeOf(fpOf(l)).h / 2 + i * lugPitch });
+    place(l, { x: EDGE + LUG_INSET + lugW / 2, y: lugTop + sizeOf(fpOf(l)).h / 2 + i * lugPitch });
   });
   const lugBottom = lugs.length ? lugTop + (lugs.length - 1) * lugPitch + Math.max(...lugs.map((l) => sizeOf(fpOf(l)).h)) : lugTop;
 
@@ -468,71 +580,33 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const digitalBottom = dropRows(digitalRows, digitalLeft, stacked ? powerBottom + ZONE_GAP : midTop, digitalSize.w);
   dropRows(otherRows, EDGE + leftZoneW, Math.max(powerBottom, digitalBottom) + ZONE_GAP / 2, contentW - leftZoneW);
 
-  // #region antenna
-  // An RF module's antenna has to look off the board, not into a ground plane.
-  // The footprint says where its antenna is by way of its keepout zone.
-  const rfHeads = clusters.filter((c) => c.kind === "mcu" || c.kind === "rf").map((c) => c.head);
-  for (const head of rfHeads) {
-    const fp = fpOf(head);
-    if (!fp?.keepouts?.length) continue;
-    const pts = fp.keepouts.flat();
-    const kx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    const ky = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    const cluster = clusters.find((c) => c.head.ref === head.ref)!;
-    // Point the antenna at the nearest board edge, and pull the cluster over so
-    // the module sits on it.
-    const size = sizeOf(fp);
-    const centre = { x: head.at.x, y: head.at.y };
-    const gaps = [
-      { rot: 180, d: centre.x - EDGE, at: { x: EDGE + cluster.w / 2, y: centre.y } }, // antenna to -x
-      { rot: 0, d: W - EDGE - centre.x, at: { x: W - EDGE - cluster.w / 2, y: centre.y } },
-      { rot: 90, d: centre.y - EDGE, at: { x: centre.x, y: EDGE + cluster.h / 2 } },
-      { rot: 270, d: H - EDGE - centre.y, at: { x: centre.x, y: H - EDGE - cluster.h / 2 } },
-    ];
-    // Only a horizontal antenna is worth honouring here: the keepout sits at
-    // one end of the module, and that end is what has to face out.
-    if (Math.abs(kx) < Math.abs(ky)) continue;
-    const best = gaps.slice(0, 2).sort((a, b) => a.d - b.d)[0];
-    const layout = cluster.layout;
-    const rot = kx > 0 ? best.rot : (best.rot + 180) % 360;
-    layout.set(head.ref, { ...layout.get(head.ref)!, rot });
-    void size;
-    void ky;
-    dropCluster(cluster, best.at);
+  // The right column, aligned on one edge so the antenna is on the board edge
+  // itself rather than behind a row of capacitors.
+  const colRight = EDGE + contentW;
+  let rightY = EDGE + topDepth + ZONE_GAP;
+  for (const c of rightMembers) {
+    const rot = faceRotation(fpOf(c.head), { x: 1, y: 0 }, c.headRot ?? 0);
+    if (!rfClusters.includes(c)) c.layout.set(c.head.ref, { ...c.layout.get(c.head.ref)!, rot });
+    dropCluster(c, { x: colRight - c.w / 2, y: rightY + c.h / 2 });
+    rightY += c.h + ZONE_GAP / 2;
+  }
+
+  let leftY = lugBottom + ZONE_GAP;
+  const leftW = leftConns.length ? Math.max(...leftConns.map((c) => c.w)) : 0;
+  for (const c of leftConns) {
+    const rot = faceRotation(fpOf(c.head), { x: -1, y: 0 }, 0);
+    c.layout.set(c.head.ref, { ...c.layout.get(c.head.ref)!, rot });
+    dropCluster(c, { x: EDGE + leftW / 2, y: leftY + c.h / 2 });
+    leftY += c.h + ZONE_GAP / 2;
   }
 
   // The board is as wide as what is on it, not as wide as the first guess.
-  const usedRight = board.footprints.reduce((m, f) => {
-    const s2 = sizeOf(fpOf(f), f.rotation);
-    return Math.max(m, f.at.x + s2.w / 2);
-  }, EDGE);
-  const boardW = snap(Math.max(usedRight + EDGE, EDGE * 2 + 40));
-
-  // Connectors go on the edge nearest the circuit they serve: a programming
-  // port belongs beside the microcontroller, not a board away from it. This
-  // runs after the zones are down, against where the content actually ended up
-  // rather than against the estimate it started from.
-  const contentRight = board.footprints.reduce((m, f) => {
-    if (edgeConnectors.some((c) => c.parts.includes(f))) return m;
-    return Math.max(m, f.at.x + sizeOf(fpOf(f), f.rotation).w / 2);
-  }, EDGE);
-  let leftY = lugBottom + ZONE_GAP;
-  let rightY = EDGE + topDepth + ZONE_GAP;
-  for (const c of edgeConnectors) {
-    const near = neighbours(c.head.ref, nl);
-    const friend = [...near]
-      .sort((a, b) => b[1] - a[1])
-      .map(([ref]) => byRef.get(ref))
-      .find((f) => f && !edgeConnectors.some((e) => e.parts.includes(f)));
-    const right = !!friend && friend.at.x > EDGE + contentRight / 2;
-    if (right) {
-      dropCluster(c, { x: contentRight + ZONE_GAP + c.w / 2, y: rightY + c.h / 2 });
-      rightY += c.h + ZONE_GAP / 2;
-    } else {
-      dropCluster(c, { x: EDGE + connW / 2, y: leftY + c.h / 2 });
-      leftY += c.h + ZONE_GAP / 2;
-    }
-  }
+  const boardW = snap(
+    Math.max(
+      board.footprints.reduce((m, f) => Math.max(m, f.at.x + sizeOf(fpOf(f), f.rotation).w / 2), EDGE) + EDGE,
+      EDGE * 2 + 40,
+    ),
+  );
 
   // Bottom edge: the regulated outputs, seated against the real edge rather
   // than a guess made before the middle was laid out. Guessing leaves a 40mm
@@ -547,8 +621,9 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   railColumns.forEach((c, i) => {
     const x = railX + i * railPitch + railPitch / 2;
     let y = realH - EDGE;
-    const th = sizeOf(fpOf(c.terminal)).h;
-    place(c.terminal, { x, y: y - th / 2 }, 180);
+    const trot = faceRotation(fpOf(c.terminal), { x: 0, y: 1 }, 180);
+    const th = sizeOf(fpOf(c.terminal), trot).h;
+    place(c.terminal, { x, y: y - th / 2 }, trot);
     y -= th + CLUSTER_GAP * 2;
     if (c.fuse) {
       const fh = sizeOf(fpOf(c.fuse), 90).h;
@@ -635,6 +710,37 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     accepted.push(r);
   }
 
+  // #region silkscreen
+  // What the board says about itself. A terminal you have to trace back to the
+  // schematic to identify is a terminal someone wires backwards at 2am.
+  board.texts = (board.texts ?? []).filter((t) => !t.text.startsWith("\u0000"));
+  board.texts = [];
+  const shortLabel = (v: string) => v.replace(/\s*(OUT|12AWG|6AWG|x4|self-resetting)\s*/gi, " ").replace(/\s+/g, " ").trim().slice(0, 18);
+  for (const c of allColumns) {
+    const t = c.terminal;
+    const s2 = sizeOf(fpOf(t), t.rotation);
+    const top = t.at.y < (board.outline[2]?.y ?? realH) / 2;
+    const label = shortLabel(t.value) || t.ref;
+    board.texts.push({
+      at: { x: t.at.x - label.length * 0.42, y: top ? t.at.y + s2.h / 2 + 1.6 : t.at.y - s2.h / 2 - 1.6 },
+      text: label.toUpperCase(),
+      layer: "F.SilkS",
+      size: 1.2,
+    });
+  }
+  for (const l of lugs) {
+    const net = Object.values(l.padNets)[0] ?? "";
+    if (!net) continue;
+    const s2 = sizeOf(fpOf(l), l.rotation);
+    board.texts.push({
+      at: { x: l.at.x - s2.w / 2, y: l.at.y - s2.h / 2 - 1.8 },
+      text: net.toUpperCase(),
+      layer: "F.SilkS",
+      size: 2,
+      bold: true,
+    });
+  }
+
   // #region outline
   let maxX = 0;
   let maxY = 0;
@@ -651,6 +757,37 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     { x: outW, y: outH },
     { x: 0, y: outH },
   ];
+
+  // A title block, dropped into the biggest piece of empty board there is.
+  const lines = [opts.org, opts.title, [opts.rev ? `REV ${opts.rev}` : "", new Date().toISOString().slice(0, 7)].filter(Boolean).join("   ")]
+    .filter((l): l is string => !!l && l.trim().length > 0)
+    .map((l) => l.toUpperCase());
+  if (lines.length) {
+    const blockW = Math.max(...lines.map((l) => l.length)) * 1.1;
+    const blockH = lines.length * 3;
+    let spot: Point | undefined;
+    for (let y = outH - EDGE - blockH; y > EDGE && !spot; y -= 2) {
+      for (let x = EDGE; x + blockW < outW - EDGE; x += 2) {
+        const box = { x1: x - 1, y1: y - 1, x2: x + blockW + 1, y2: y + blockH + 1 };
+        if (accepted.some((a) => hits(a, box))) continue;
+        spot = { x, y };
+        break;
+      }
+    }
+    if (spot) {
+      lines.forEach((l, i) => {
+        board.texts.push({
+          at: { x: spot!.x, y: spot!.y + i * 3 },
+          text: l,
+          layer: "F.SilkS",
+          size: i === 0 ? 2.2 : 1.6,
+          bold: i === 0,
+        });
+      });
+    } else {
+      notes.push("no clear space for a title block on the silkscreen");
+    }
+  }
 
   if (displaced.length) notes.push(`overlap guard moved ${displaced.length} parts below the board: ${displaced.slice(0, 8).join(", ")}`);
   notes.push(

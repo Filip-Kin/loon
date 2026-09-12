@@ -34,6 +34,7 @@ export function buildOra(): Schematic {
   const schem = emptySchematic(crypto.randomUUID());
   schem.title = "ORA 24V Power Distribution + E-Stop Controller";
   schem.rev = "B";
+  schem.company = "Oakland Robotics Association";
 
   const ops: Op[] = [];
   // Labels are placed on a pin, found by geometry after the parts land. Hand

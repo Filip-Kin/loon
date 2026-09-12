@@ -153,7 +153,7 @@ export function generateBoard(schem: Schematic, resolve: DefResolver | undefined
   // the middle, logic away from the switching nodes.
   const notes: string[] = [];
   if (!opts.existing) {
-    const res = autoPlace(board, opts.footprints, nl);
+    const res = autoPlace(board, opts.footprints, nl, { title: schem.title, rev: schem.rev, org: schem.company });
     notes.push(...res.notes);
   } else {
     let maxX = 0;

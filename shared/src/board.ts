@@ -80,6 +80,18 @@ export const OSHPARK_4LAYER: DesignRules = {
   note: "Same 6 mil rules as the 2-layer service, on four layers.",
 };
 
+// Silkscreen text: what the board says about itself. A connector you cannot
+// identify without the schematic is a connector someone will wire backwards.
+export interface BoardText {
+  at: Point;
+  text: string;
+  layer: string; // "F.SilkS" / "B.SilkS"
+  size: number; // mm
+  thickness?: number;
+  rotation?: number;
+  bold?: boolean;
+}
+
 export interface Board {
   version: number;
   generator: string;
@@ -90,6 +102,7 @@ export interface Board {
   tracks: Track[];
   vias: Via[];
   zones: Zone[];
+  texts: BoardText[];
 }
 
 export function emptyBoard(rules: DesignRules = OSHPARK_2LAYER): Board {
@@ -100,6 +113,7 @@ export function emptyBoard(rules: DesignRules = OSHPARK_2LAYER): Board {
     rules,
     outline: [],
     footprints: [],
+    texts: [],
     tracks: [],
     vias: [],
     zones: [],
