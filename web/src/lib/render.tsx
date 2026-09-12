@@ -75,10 +75,10 @@ function graphicEl(g: SymGraphic, place: Placement, key: number): React.ReactNod
   }
 }
 
-export function SymbolView({ inst, def, selected }: { inst: SymbolInstance; def: LibSymbol; selected: boolean }) {
+export function SymbolView({ inst, def, selected, highlighted }: { inst: SymbolInstance; def: LibSymbol; selected: boolean; highlighted?: boolean }) {
   const place: Placement = { at: inst.at, rotation: inst.rotation, mirror: inst.mirror };
   return (
-    <g opacity={selected ? 1 : 0.95}>
+    <g opacity={selected ? 1 : 0.95} filter={highlighted ? "url(#netglow)" : undefined}>
       {def.graphics.map((g, i) => graphicEl(g, place, i))}
       {def.pins.map((pin, i) => {
         const a = pinWorld(pin, place);

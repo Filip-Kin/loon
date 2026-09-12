@@ -12,6 +12,8 @@ import type { Schematic } from "@loon/shared/schematic";
 import type { Op } from "@loon/shared/ops";
 import { moduleSummaries } from "@loon/shared/modules";
 import { pinBudget, formatBudget } from "@loon/shared/pinbudget";
+import { buildNetlist, formatNetlist } from "@loon/shared/netlist";
+import { runErc, formatErc } from "@loon/shared/erc";
 import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
 
@@ -42,8 +44,25 @@ function partsContext(): string {
 // What the design has already spent of its MCU pins, and what that leaves.
 // Without this the assistant guesses at questions like "do I have enough ADC
 // channels", which is exactly the kind of guess that costs a board spin.
+function defResolver(libId: string) {
+  return library.get(libId)?.def;
+}
+
+function netlistContext(schem: Schematic): string {
+  if (schem.symbols.length === 0) return "(empty sheet)";
+  const nl = buildNetlist(schem, defResolver);
+  return formatNetlist(nl, 50);
+}
+
+// The assistant sees its own rule violations, so it can fix them in the next
+// turn instead of leaving them for the user to find.
+function ercContext(schem: Schematic): string {
+  if (schem.symbols.length === 0) return "(empty sheet)";
+  return formatErc(runErc(schem, defResolver), 20);
+}
+
 function budgetContext(schem: Schematic): string {
-  const budgets = pinBudget(schem);
+  const budgets = pinBudget(schem, defResolver);
   if (budgets.length === 0) return "(no MCU placed yet)";
   return budgets.map(formatBudget).join("\n");
 }
@@ -120,6 +139,12 @@ ${partsContext()}
 CURRENT SCHEMATIC:
 ${schematicContext(schem)}
 
+NETS (derived from the sheet, this is the real connectivity):
+${netlistContext(schem)}
+
+RULE CHECK ON THE CURRENT SHEET:
+${ercContext(schem)}
+
 MCU PIN BUDGET:
 ${budgetContext(schem)}
 
@@ -133,6 +158,7 @@ If the user asks a question rather than giving an instruction ("how much would X
 - the one design catch that matters, in a sentence.
 Then offer to build it. Keep it to a short list a person reads in ten seconds, not an essay. Plain text, no markdown tables.
 If the user gives an instruction, do the work with ops and keep "message" to one line.
+If the rule check above lists errors that your previous edit caused, fix them as part of this request.
 
 USER REQUEST:
 ${userMessage}

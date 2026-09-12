@@ -21,6 +21,8 @@ interface Props {
   onMove: (uuid: string, world: Point) => void;
   onConnect: (a: PinRef, b: PinRef) => void;
   onAddWire: (from: Point, to: Point) => void;
+  // Parts on the net the user picked in the check panel, drawn with a halo.
+  highlightRefs?: Set<string> | null;
 }
 
 const WIRE = "#4ea1ff";
@@ -209,6 +211,9 @@ export function Canvas(props: Props) {
         <pattern id="grid" width={PLACE_GRID} height={PLACE_GRID} patternUnits="userSpaceOnUse">
           <circle cx={0} cy={0} r={0.12} fill="#333" />
         </pattern>
+        <filter id="netglow" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="0" stdDeviation="0.7" floodColor="#10b981" floodOpacity="0.95" />
+        </filter>
       </defs>
       <g transform={`translate(${viewport.x},${viewport.y}) scale(${viewport.scale})`}>
         <rect x={-2000} y={-2000} width={6000} height={6000} fill="url(#grid)" />
@@ -273,7 +278,8 @@ export function Canvas(props: Props) {
           const def = defs[inst.libId];
           if (!def) return null;
           const drawInst = inst.uuid === dragUuid && dragPos ? { ...inst, at: dragPos } : inst;
-          return <SymbolView key={inst.uuid} inst={drawInst} def={def} selected={inst.uuid === props.selection} />;
+          const lit = props.highlightRefs?.has(inst.properties.Reference ?? "") ?? false;
+          return <SymbolView key={inst.uuid} inst={drawInst} def={def} selected={inst.uuid === props.selection} highlighted={lit} />;
         })}
 
         {/* selection box */}

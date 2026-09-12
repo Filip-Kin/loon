@@ -104,6 +104,25 @@ svg.canvas.panning { cursor: grabbing; }
 
 .part-row .price { float: right; color: var(--text-faint); font-weight: 400; font-size: 12px; }
 
+.check { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.check-head { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.check-head button { margin-left: auto; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--text-dim); }
+.pill.good { background: rgba(16,185,129,0.15); color: #34d399; }
+.pill.bad { background: rgba(239,68,68,0.15); color: #ffb4b4; }
+.pill.warn { background: rgba(216,178,74,0.15); color: #d8b24a; }
+.issue { padding: 7px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.issue:hover { background: var(--panel-2); }
+.issue .rule { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.issue.error .rule { color: #ffb4b4; }
+.issue .msg { font-size: 12.5px; line-height: 1.35; }
+.nets-head { padding: 10px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-faint); border-top: 1px solid var(--line); }
+.net-row { display: flex; gap: 8px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+.net-row:hover, .net-row.on { background: rgba(16,185,129,0.12); }
+.net-row.power .name { color: #d8b24a; }
+.net-row .name { flex: 1; font-family: ui-monospace, monospace; }
+.net-row .count { color: var(--text-faint); }
+
 .hint { padding: 8px 12px; color: var(--text-faint); font-size: 12px; line-height: 1.5; border-top: 1px solid var(--line); }
 .toast { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line-2); padding: 8px 14px; border-radius: 8px; font-size: 13px; }
 .toast.err { border-color: var(--error); color: #ffb4b4; }

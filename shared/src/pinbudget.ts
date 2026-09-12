@@ -3,18 +3,13 @@
 // is what turns "do I have enough channels for current monitoring?" into an
 // answer with numbers in it.
 //
-// A pin counts as used when a wire endpoint, a junction or a label sits on its
-// world position - the same coincidence rule the wiring tool uses.
+// A pin counts as used when the netlist puts it on a net with something else on
+// it, so this agrees with the schematic's real connectivity rather than with
+// whatever happens to sit near the pin.
 
-import type { Schematic, Point } from "./schematic";
-import { pinWorld } from "./geometry";
+import type { Schematic } from "./schematic";
+import { buildNetlist, type Netlist, type DefResolver } from "./netlist";
 import { mcuProfileFor, type McuPin } from "./mcu";
-
-const TOL = 0.6; // mm; pins live on a 2.54 grid so this is generous but safe
-
-function near(a: Point, b: Point): boolean {
-  return Math.abs(a.x - b.x) <= TOL && Math.abs(a.y - b.y) <= TOL;
-}
 
 export interface UsedPin {
   pin: McuPin;
@@ -35,38 +30,27 @@ export interface McuBudget {
   rules: string[];
 }
 
-export function pinBudget(schem: Schematic): McuBudget[] {
+export function pinBudget(schem: Schematic, resolve?: DefResolver, netlist?: Netlist): McuBudget[] {
   const out: McuBudget[] = [];
+  const nl = netlist ?? buildNetlist(schem, resolve);
+  // A net with a single pin is a stub, not a connection.
+  const shared = new Set(nl.nets.filter((n) => n.pins.length > 1 || n.isPower).map((n) => n.name));
   for (const inst of schem.symbols) {
     const profile = mcuProfileFor(inst.libId);
     if (!profile) continue;
-    const def = schem.libSymbols[inst.libId];
-    if (!def) continue;
-
-    const anchors: { at: Point; net?: string }[] = [];
-    for (const w of schem.wires) {
-      if (w.pts.length) {
-        anchors.push({ at: w.pts[0] });
-        anchors.push({ at: w.pts[w.pts.length - 1] });
-      }
-    }
-    for (const j of schem.junctions) anchors.push({ at: j.at });
-    for (const l of schem.labels) anchors.push({ at: l.at, net: l.text });
+    const ref = inst.properties.Reference ?? "?";
 
     const used: UsedPin[] = [];
     for (const mp of profile.pins) {
-      const sp = def.pins.find((p) => p.number === mp.number);
-      if (!sp) continue;
-      const world = pinWorld(sp, { at: inst.at, rotation: inst.rotation, mirror: inst.mirror });
-      const hit = anchors.find((a) => near(a.at, world));
-      if (hit) used.push({ pin: mp, pinNumber: mp.number, net: hit.net });
+      const net = nl.netOfPin[`${ref}:${mp.number}`];
+      if (net && shared.has(net)) used.push({ pin: mp, pinNumber: mp.number, net });
     }
 
     const usedGpio = new Set(used.map((u) => u.pin.gpio).filter((g): g is number => g !== undefined));
     const free = profile.pins.filter((p) => p.gpio !== undefined && !usedGpio.has(p.gpio) && !p.reserved);
 
     out.push({
-      ref: inst.properties.Reference ?? "?",
+      ref,
       libId: inst.libId,
       name: profile.name,
       usedPins: used,

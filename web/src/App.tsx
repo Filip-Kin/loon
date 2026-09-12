@@ -5,6 +5,8 @@ import { PartsPanel } from "./panels/PartsPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { AiPanel, type ChatMsg } from "./panels/AiPanel";
 import { DebugPanel } from "./panels/DebugPanel";
+import { CheckPanel } from "./panels/CheckPanel";
+import type { ErcIssue } from "@loon/shared/erc";
 import { makeClientResolver } from "./lib/resolver";
 import { applyOps } from "@loon/shared/apply-ops";
 import type { Schematic, LibSymbol, Point } from "@loon/shared/schematic";
@@ -26,7 +28,11 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [aiAvailable, setAiAvailable] = useState(true);
-  const [rightTab, setRightTab] = useState<"props" | "ai" | "debug">("ai");
+  const [rightTab, setRightTab] = useState<"props" | "ai" | "debug" | "check">("ai");
+  const [issues, setIssues] = useState<ErcIssue[]>([]);
+  const [nets, setNets] = useState<{ name: string; isPower: boolean; pins: string[] }[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [highlightNet, setHighlightNet] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -176,6 +182,34 @@ export function App() {
     setBusy(false);
   }
 
+  // #region checks
+  async function runCheck() {
+    if (!schem) return;
+    setChecking(true);
+    try {
+      const res = await trpc.design.check.query({ schem });
+      setIssues(res.issues as ErcIssue[]);
+      setNets(res.nets);
+    } catch (e: any) {
+      flash(String(e?.message ?? e), true);
+    }
+    setChecking(false);
+  }
+
+  // Re-check whenever the design settles, so the error count is never stale.
+  useEffect(() => {
+    if (!schem) return;
+    const t = setTimeout(() => { runCheck(); }, 1200);
+    return () => clearTimeout(t);
+  }, [schem]);
+
+  const highlightRefs = useMemo(() => {
+    if (!highlightNet) return null;
+    const net = nets.find((n) => n.name === highlightNet);
+    if (!net) return null;
+    return new Set(net.pins.map((p) => p.split(".")[0]));
+  }, [highlightNet, nets]);
+
   // #region autosave
   // Every mutation funnels through commit(), so watching `schem` catches edits,
   // AI ops and undo/redo alike. Debounced, because dragging a symbol produces a
@@ -306,6 +340,7 @@ export function App() {
               onMove={(uuid, w) => applyLocal([{ op: "move_symbol", uuid, at: w }])}
               onConnect={(a: PinRef, b: PinRef) => applyLocal([{ op: "connect_pins", a, b }])}
               onAddWire={(from, to) => applyLocal([{ op: "add_wire", from, to }])}
+              highlightRefs={highlightRefs}
             />
           )}
           {toast && <div className={"toast" + (toast.err ? " err" : "")}>{toast.text}</div>}
@@ -314,11 +349,23 @@ export function App() {
         <div className="panel right">
           <div className="tabs">
             <button className={rightTab === "ai" ? "on" : ""} onClick={() => setRightTab("ai")}>AI</button>
+            <button className={rightTab === "check" ? "on" : ""} onClick={() => { setRightTab("check"); runCheck(); }}>
+              Check{issues.some((i) => i.severity === "error") ? ` (${issues.filter((i) => i.severity === "error").length})` : ""}
+            </button>
             <button className={rightTab === "props" ? "on" : ""} onClick={() => setRightTab("props")}>Properties</button>
             <button className={rightTab === "debug" ? "on" : ""} onClick={() => setRightTab("debug")}>Debug</button>
           </div>
           {rightTab === "debug" ? (
             <DebugPanel />
+          ) : rightTab === "check" ? (
+            <CheckPanel
+              issues={issues}
+              nets={nets}
+              busy={checking}
+              onRefresh={runCheck}
+              onSelectNet={(n) => setHighlightNet((cur) => (cur === n ? null : n))}
+              highlight={highlightNet}
+            />
           ) : rightTab === "ai" ? (
             <AiPanel messages={messages} busy={busy} elapsed={elapsed} aiAvailable={aiAvailable} onSend={aiSend} />
           ) : (

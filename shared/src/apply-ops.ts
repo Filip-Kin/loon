@@ -5,7 +5,7 @@
 
 import type { Schematic, SymbolInstance, LibSymbol, Point } from "./schematic";
 import type { Op, OpResult } from "./ops";
-import { findPin, pinWorld, routeOrthogonal, snapPoint, PLACE_GRID } from "./geometry";
+import { findPin, pinWorld, routeOrthogonal, snapPoint, instanceBBox, PLACE_GRID } from "./geometry";
 import { MODULES } from "./modules";
 import { buildIcSymbol } from "./symbolgen";
 
@@ -39,6 +39,40 @@ const normRef = (r: string) => r.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 const RAIL_NETS = /^(GND|AGND|PGND|VBUS|VCC|VDD|\+?\d+V\d*|\+\d+V)$/i;
 function isRailNet(label: string): boolean {
   return RAIL_NETS.test(label.trim());
+}
+
+// A wire that passes over an unrelated pin connects to it - that is how KiCad
+// reads it, and it is a real short, not a cosmetic problem. So a wire is only
+// drawn when its route is clear of every other pin and symbol body; otherwise
+// the two ends stay joined by name.
+const CLEAR_TOL = 0.6; // mm
+
+function pointOnSegment(p: Point, a: Point, b: Point, tol: number): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return false;
+  const cross = Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len;
+  if (cross > tol) return false;
+  const dot = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len;
+  return dot > tol && dot < len - tol;
+}
+
+function segmentHitsBox(a: Point, b: Point, box: { min: Point; max: Point }): boolean {
+  // Axis-aligned segments only, which is all routeOrthogonal produces.
+  const lo = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) };
+  const hi = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) };
+  return lo.x <= box.max.x && hi.x >= box.min.x && lo.y <= box.max.y && hi.y >= box.min.y;
+}
+
+function routeIsClear(pts: Point[], obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[] }): boolean {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    for (const p of obstacles.pins) if (pointOnSegment(p, a, b, CLEAR_TOL)) return false;
+    for (const box of obstacles.boxes) if (segmentHitsBox(a, b, box)) return false;
+  }
+  return true;
 }
 
 function findByRef(schem: Schematic, ref: string): SymbolInstance | undefined {
@@ -229,7 +263,21 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
         list.push({ at, first: list.length === 0 });
         netPoints.set(net.label, list);
       }
+      // Obstacles: every pin not on this net, and every symbol body.
+      const memberRefs = new Set(localToRef.values());
+      const allPinPoints: { at: Point; netLabel?: string }[] = [];
+      const bodyBoxes: { min: Point; max: Point }[] = [];
+      for (const inst of schem.symbols) {
+        const d = resolve(inst.libId)?.def;
+        if (!d) continue;
+        for (const pin of d.pins) allPinPoints.push({ at: pinWorld(pin, inst) });
+        if (memberRefs.has(inst.properties.Reference ?? "")) {
+          bodyBoxes.push(instanceBBox(d, { at: inst.at, rotation: inst.rotation, mirror: inst.mirror }));
+        }
+      }
+
       for (const [label, pts] of netPoints) {
+        const blockedEnds: Point[] = [];
         if (!isRailNet(label) && pts.length > 1) {
           // Chain the pins nearest-first so the wire order follows the layout
           // rather than the order the module happened to declare them in.
@@ -243,15 +291,30 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
               if (d < bestD) { bestD = d; bestIdx = i; }
             }
             const next = remaining.splice(bestIdx, 1)[0];
-            schem.wires.push({ uuid: newUuid(), pts: routeOrthogonal(cur, next) });
+            const route = routeOrthogonal(cur, next);
+            const onNet = new Set(pts.map((pp) => `${pp.at.x},${pp.at.y}`));
+            const obstacles = {
+              pins: allPinPoints.filter((pp) => !onNet.has(`${pp.at.x},${pp.at.y}`)).map((pp) => pp.at),
+              boxes: bodyBoxes,
+            };
+            if (routeIsClear(route, obstacles)) {
+              schem.wires.push({ uuid: newUuid(), pts: route });
+            } else {
+              // Blocked: fall back to joining by name at both ends.
+              blockedEnds.push(cur, next);
+            }
             cur = next;
           }
         }
-        // One label per net inside the block (every pin for rails, so the
-        // ground and supply symbols read at a glance).
-        const labelled = isRailNet(label) ? pts : [pts[0]];
-        for (const pt of labelled) {
-          schem.labels.push({ uuid: newUuid(), kind: "local", text: label, at: pt.at, rotation: 0 });
+        // One label per net inside the block (every pin for rails, and both
+        // ends of any hop that could not be wired without crossing something).
+        const labelled = isRailNet(label) ? pts.map((pp) => pp.at) : [pts[0].at, ...blockedEnds];
+        const placed = new Set<string>();
+        for (const at of labelled) {
+          const k = `${at.x},${at.y}`;
+          if (placed.has(k)) continue;
+          placed.add(k);
+          schem.labels.push({ uuid: newUuid(), kind: "local", text: label, at, rotation: 0 });
         }
       }
       return { ok: true, createdUuid: firstUuid };

@@ -5,6 +5,8 @@ import { storage } from "../services/storage";
 import { generateOps } from "../services/ai";
 import { probeHub } from "../services/probe-hub";
 import { parseSchematic, serializeSchematic } from "@loon/shared/kicad-sch";
+import { buildNetlist } from "@loon/shared/netlist";
+import { runErc } from "@loon/shared/erc";
 import { emptySchematic, type Schematic, type LibSymbol } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
 import type { SxList } from "@loon/shared/sexpr";
@@ -162,7 +164,24 @@ const probeRouter = router({
     }),
 });
 
+// Connectivity and rule checks over whatever the browser currently has.
+const designRouter = router({
+  check: publicProcedure
+    .input(z.object({ schem: z.any() }))
+    .query(({ input }) => {
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      const nl = buildNetlist(schem, defs);
+      const issues = runErc(schem, defs, nl);
+      return {
+        nets: nl.nets.map((n) => ({ name: n.name, isPower: n.isPower, pins: n.pins.map((p) => `${p.ref}.${p.pin}`) })),
+        issues,
+      };
+    }),
+});
+
 export const appRouter = router({
+  design: designRouter,
   library: librouter,
   project: projectRouter,
   ai: aiRouter,
