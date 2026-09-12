@@ -41,7 +41,7 @@ export function PartsPanel({ parts, placingLibId, onPick }: Props) {
         {filtered.length === 0 && <div className="hint">No parts match. Loosen the source filter.</div>}
         {filtered.map((p) => (
           <div key={p.id} className={"part-row" + (placingLibId === p.libId ? " active" : "")} onClick={() => onPick(p.libId)}>
-            <div className="name">{p.name}</div>
+            <div className="name">{p.name}{p.priceUsd !== undefined && <span className="price">${p.priceUsd.toFixed(2)}</span>}</div>
             <div className="desc">{p.description || p.libId}</div>
             <div className="srcs">
               {ALL_SOURCES.map((s) => {

@@ -3,6 +3,8 @@
 // there is exactly one way to mutate a schematic. The AI returns an array of
 // these; the server validates and applies them, then returns the new state.
 
+import type { IcSymbolSpec } from "./symbolgen";
+
 export type PinRef = { ref: string; pin: string }; // e.g. { ref: "R1", pin: "1" }
 
 export type Op =
@@ -19,7 +21,12 @@ export type Op =
   | { op: "set_title"; title?: string; rev?: string; company?: string }
   // Instantiate a parametric sub-circuit (a "module"): expands to primitive
   // ops. Modules are the building blocks the AI composes larger designs from.
-  | { op: "instantiate_module"; moduleId: string; params?: Record<string, string | number>; at?: { x: number; y: number } };
+  | { op: "instantiate_module"; moduleId: string; params?: Record<string, string | number>; at?: { x: number; y: number } }
+  // Declare a part that is not in the builtin catalog (any IC, module or
+  // connector) from its pin list. The generated symbol is stored on the
+  // schematic, so it renders, wires and saves exactly like a builtin part.
+  // This exists so the assistant never has to stand in a placeholder header.
+  | ({ op: "define_symbol" } & IcSymbolSpec);
 
 export interface OpResult {
   ok: boolean;

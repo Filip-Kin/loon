@@ -98,6 +98,8 @@ svg.canvas.panning { cursor: grabbing; }
 .ai .composer { border-top: 1px solid var(--line); padding: 10px; display: flex; gap: 8px; }
 .ai .composer textarea { flex: 1; resize: none; height: 56px; }
 
+.part-row .price { float: right; color: var(--text-faint); font-weight: 400; font-size: 12px; }
+
 .hint { padding: 8px 12px; color: var(--text-faint); font-size: 12px; line-height: 1.5; border-top: 1px solid var(--line); }
 .toast { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line-2); padding: 8px 14px; border-radius: 8px; font-size: 13px; }
 .toast.err { border-color: var(--error); color: #ffb4b4; }

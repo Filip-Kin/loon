@@ -7,6 +7,7 @@ import type { Schematic, SymbolInstance, LibSymbol } from "./schematic";
 import type { Op, OpResult } from "./ops";
 import { findPin, pinWorld, routeOrthogonal, snapPoint, PLACE_GRID } from "./geometry";
 import { MODULES } from "./modules";
+import { buildIcSymbol } from "./symbolgen";
 
 export interface ResolvedPart {
   def: LibSymbol;
@@ -51,8 +52,30 @@ function resolvePin(def: LibSymbol, pin: string) {
   );
 }
 
-export function applyOp(schem: Schematic, op: Op, resolve: LibResolver): OpResult {
+export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpResult {
+  // Parts declared at runtime (define_symbol) and parts loaded from an
+  // external file live on the schematic, not in the builtin catalog. Falling
+  // back to them here means every caller - browser, server, undo/redo - can
+  // place and wire them without a library round trip.
+  const resolve: LibResolver = (libId) => {
+    const hit = resolveBase(libId);
+    if (hit) return hit;
+    const def = schem.libSymbols[libId];
+    return def ? { def, footprint: def.defaults.Footprint || undefined } : undefined;
+  };
   switch (op.op) {
+    case "define_symbol": {
+      const { op: _op, ...spec } = op;
+      if (!spec.libId || !spec.libId.includes(":")) {
+        return { ok: false, error: `define_symbol needs a libId like "Library:PartName"` };
+      }
+      if (!spec.pins || spec.pins.length === 0) {
+        return { ok: false, error: `define_symbol ${spec.libId} has no pins` };
+      }
+      schem.libSymbols[spec.libId] = buildIcSymbol(spec);
+      return { ok: true };
+    }
+
     case "add_symbol": {
       const part = resolve(op.libId);
       if (!part) return { ok: false, error: `Unknown part: ${op.libId}` };

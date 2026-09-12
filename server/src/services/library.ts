@@ -6,7 +6,9 @@
 // seeded/mock for the prototype; the live supplier APIs replace it later.
 
 import { parse, type SxList } from "@loon/shared/sexpr";
-import { parseLibSymbol } from "@loon/shared/kicad-sch";
+import { parseLibSymbol, emitLibSymbol } from "@loon/shared/kicad-sch";
+import { buildIcSymbol, type IcSymbolSpec } from "@loon/shared/symbolgen";
+import { REAL_PARTS } from "./real-parts";
 import type { LibSymbol } from "@loon/shared/schematic";
 import type { PartSummary, PartSearchQuery, SourceAvailability } from "@loon/shared/parts";
 import { partMatches } from "@loon/shared/parts";
@@ -268,17 +270,17 @@ const NMOS = `(symbol "Device:Q_NMOS_GSD"
 const GENERATED: string[] = [conn1x(3), conn1x(4), conn1x(5), conn1x(6), conn1x(8), conn1x(15), conn2x20(), NMOS];
 
 // Seed sourcing data. `available` toggles per source drive the source filter.
-type Seed = { digikey?: boolean; mouser?: boolean; oshpark?: boolean; footprints?: string[] };
+type Seed = { digikey?: boolean; mouser?: boolean; oshpark?: boolean; footprints?: string[]; priceUsd?: number };
 const SEEDS: Record<string, Seed> = {
-  "Device:R": { digikey: true, mouser: true, oshpark: true, footprints: ["Resistor_SMD:R_0603_1608Metric", "Resistor_SMD:R_0805_2012Metric", "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"] },
-  "Device:C": { digikey: true, mouser: true, oshpark: true, footprints: ["Capacitor_SMD:C_0603_1608Metric", "Capacitor_SMD:C_0805_2012Metric"] },
-  "Device:C_Polarized": { digikey: true, mouser: true, oshpark: false, footprints: ["Capacitor_THT:CP_Radial_D5.0mm_P2.50mm"] },
-  "Device:L": { digikey: true, mouser: true, oshpark: false, footprints: ["Inductor_SMD:L_0805_2012Metric"] },
-  "Device:LED": { digikey: true, mouser: true, oshpark: true, footprints: ["LED_SMD:LED_0603_1608Metric", "LED_THT:LED_D5.0mm"] },
-  "Device:D": { digikey: true, mouser: true, oshpark: true, footprints: ["Diode_SMD:D_SOD-123"] },
-  "Device:Q_NPN_BCE": { digikey: true, mouser: true, oshpark: false, footprints: ["Package_TO_SOT_SMD:SOT-23"] },
-  "Switch:SW_Push": { digikey: true, mouser: true, oshpark: false, footprints: ["Button_Switch_SMD:SW_SPST_B3U-1000P"] },
-  "Connector:Conn_01x02": { digikey: true, mouser: true, oshpark: false, footprints: ["Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"] },
+  "Device:R": { priceUsd: 0.02, digikey: true, mouser: true, oshpark: true, footprints: ["Resistor_SMD:R_0603_1608Metric", "Resistor_SMD:R_0805_2012Metric", "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"] },
+  "Device:C": { priceUsd: 0.03, digikey: true, mouser: true, oshpark: true, footprints: ["Capacitor_SMD:C_0603_1608Metric", "Capacitor_SMD:C_0805_2012Metric"] },
+  "Device:C_Polarized": { priceUsd: 0.25, digikey: true, mouser: true, oshpark: false, footprints: ["Capacitor_THT:CP_Radial_D5.0mm_P2.50mm"] },
+  "Device:L": { priceUsd: 0.35, digikey: true, mouser: true, oshpark: false, footprints: ["Inductor_SMD:L_0805_2012Metric"] },
+  "Device:LED": { priceUsd: 0.1, digikey: true, mouser: true, oshpark: true, footprints: ["LED_SMD:LED_0603_1608Metric", "LED_THT:LED_D5.0mm"] },
+  "Device:D": { priceUsd: 0.12, digikey: true, mouser: true, oshpark: true, footprints: ["Diode_SMD:D_SOD-123"] },
+  "Device:Q_NPN_BCE": { priceUsd: 0.12, digikey: true, mouser: true, oshpark: false, footprints: ["Package_TO_SOT_SMD:SOT-23"] },
+  "Switch:SW_Push": { priceUsd: 0.22, digikey: true, mouser: true, oshpark: false, footprints: ["Button_Switch_SMD:SW_SPST_B3U-1000P"] },
+  "Connector:Conn_01x02": { priceUsd: 0.35, digikey: true, mouser: true, oshpark: false, footprints: ["Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"] },
   "power:GND": {},
   "power:+5V": {},
   "power:+3V3": {},
@@ -290,12 +292,12 @@ export interface LibEntry {
   part: PartSummary;
 }
 
-function buildAvailability(libId: string, seed: Seed): SourceAvailability[] {
+function buildAvailability(libId: string, seed: Seed, priceUsd?: number, sku?: string): SourceAvailability[] {
   const out: SourceAvailability[] = [
     { source: "kicad", available: true },
   ];
-  if (seed.digikey) out.push({ source: "digikey", available: true });
-  if (seed.mouser) out.push({ source: "mouser", available: true });
+  if (seed.digikey) out.push({ source: "digikey", available: true, priceUsd: priceUsd ?? seed.priceUsd, sku });
+  if (seed.mouser) out.push({ source: "mouser", available: true, priceUsd: priceUsd ?? seed.priceUsd, sku });
   if (seed.oshpark) out.push({ source: "oshpark", available: true });
   return out;
 }
@@ -304,6 +306,30 @@ class Library {
   private entries = new Map<string, LibEntry>();
 
   constructor() {
+    // Real multi-pin parts (MCU modules, regulators, connectors, sensors) are
+    // declared as pin lists and generated, rather than hand-drawn, so adding a
+    // chip is a datasheet transcription instead of S-expr artwork.
+    for (const spec of REAL_PARTS) {
+      const def = buildIcSymbol(spec.symbol);
+      const part: PartSummary = {
+        id: def.libId,
+        libId: def.libId,
+        name: def.libId.split(":")[1] ?? def.libId,
+        description: def.description ?? "",
+        refPrefix: def.refPrefix,
+        keywords: def.keywords ?? "",
+        footprints: spec.symbol.footprint ? [spec.symbol.footprint] : [],
+        sources: buildAvailability(def.libId, {
+          digikey: true,
+          mouser: true,
+          oshpark: spec.assemblable !== false,
+        }, spec.priceUsd, spec.mpn),
+        priceUsd: spec.priceUsd,
+        priceNote: spec.priceNote ?? "typical qty-1 estimate",
+        mpn: spec.mpn,
+      };
+      this.entries.set(def.libId, { def, raw: emitLibSymbol(def), part });
+    }
     for (const raw of [...SYMBOLS, ...GENERATED]) {
       const sx = parse(raw);
       const def = parseLibSymbol(sx);
@@ -316,7 +342,9 @@ class Library {
         refPrefix: def.refPrefix,
         keywords: def.keywords ?? "",
         footprints: seed.footprints ?? [],
-        sources: buildAvailability(def.libId, seed),
+        sources: buildAvailability(def.libId, seed, seed.priceUsd),
+        priceUsd: seed.priceUsd,
+        priceNote: seed.priceUsd ? "typical qty-1 estimate" : undefined,
       };
       this.entries.set(def.libId, { def, raw: sx, part });
     }

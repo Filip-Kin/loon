@@ -83,10 +83,21 @@ export function SymbolView({ inst, def, selected }: { inst: SymbolInstance; def:
       {def.pins.map((pin, i) => {
         const a = pinWorld(pin, place);
         const b = pinBodyEnd(pin, place);
+        // Named pins get their name inside the body and their number outside,
+        // the way KiCad draws an IC. Anonymous passives (name "~") stay bare.
+        const named = pin.name && pin.name !== "~";
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const anchor = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "start" : "end") : "middle";
         return (
           <g key={`p${i}`}>
             <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={SYMBOL} strokeWidth={0.2} vectorEffect="non-scaling-stroke" />
             <circle cx={a.x} cy={a.y} r={0.5} fill={PIN} />
+            {named && (
+              <>
+                <text x={b.x + Math.sign(dx) * 0.6} y={b.y + 0.45} fontSize={1.1} fill={TEXT} textAnchor={anchor}>{pin.name}</text>
+                <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 0.4} fontSize={0.9} fill="#6f6f6f" textAnchor="middle">{pin.number}</text>
+              </>
+            )}
           </g>
         );
       })}

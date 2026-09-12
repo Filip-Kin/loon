@@ -175,6 +175,71 @@ function propNode(key: string, val: string, at: Point, rot = 0, hide = false): S
   return list(sym("property"), ...items);
 }
 
+// #region lib symbol emission
+// Serializes a LibSymbol back to a KiCad `(symbol ...)` definition. Parts that
+// came from a loaded file keep their verbatim S-expr (libRaw); parts generated
+// at runtime (buildIcSymbol, i.e. anything the assistant declared) go through
+// here so they still land in lib_symbols and open in KiCad.
+function pinNode(p: SymPin): SxList {
+  return list(
+    sym("pin"),
+    sym(p.type),
+    sym("line"),
+    node("at", num(p.at.x), num(p.at.y), num(p.rotation)),
+    node("length", num(p.length)),
+    list(sym("name"), str(p.name), effects()),
+    list(sym("number"), str(p.number), effects()),
+  );
+}
+
+function fillNode(fill?: string): SxList {
+  return node("fill", node("type", sym(fill ?? "none")));
+}
+
+function graphicNode(g: SymGraphic): SxList | undefined {
+  const stroke = node("stroke", node("width", num(0.254)), node("type", sym("default")));
+  switch (g.type) {
+    case "rect":
+      return list(sym("rectangle"), node("start", num(g.a.x), num(g.a.y)), node("end", num(g.b.x), num(g.b.y)), stroke, fillNode(g.fill));
+    case "polyline": {
+      const pts = list(sym("pts"), ...g.pts.map((p) => node("xy", num(p.x), num(p.y))));
+      return list(sym("polyline"), pts, stroke, fillNode(g.fill));
+    }
+    case "circle":
+      return list(sym("circle"), node("center", num(g.center.x), num(g.center.y)), node("radius", num(g.radius)), stroke, fillNode(g.fill));
+    case "arc":
+      return list(sym("arc"), node("start", num(g.start.x), num(g.start.y)), node("mid", num(g.mid.x), num(g.mid.y)), node("end", num(g.end.x), num(g.end.y)), stroke, fillNode());
+    case "text":
+      return list(sym("text"), str(g.text), node("at", num(g.at.x), num(g.at.y), num(0)), effects(g.size));
+    default:
+      return undefined;
+  }
+}
+
+export function emitLibSymbol(def: LibSymbol): SxList {
+  const root = list(sym("symbol"), str(def.libId));
+  root.items.push(node("pin_names", node("offset", num(0.254))));
+  root.items.push(node("in_bom", sym("yes")));
+  root.items.push(node("on_board", sym("yes")));
+  const top = def.bbox.max.y + 2.54;
+  root.items.push(propNode("Reference", `${def.refPrefix}`, { x: 0, y: top }, 0));
+  root.items.push(propNode("Value", def.defaults.Value ?? "", { x: 0, y: def.bbox.min.y - 2.54 }, 0));
+  root.items.push(propNode("Footprint", def.defaults.Footprint ?? "", { x: 0, y: 0 }, 0, true));
+  root.items.push(propNode("Datasheet", def.datasheet ?? "~", { x: 0, y: 0 }, 0, true));
+  if (def.keywords) root.items.push(propNode("ki_keywords", def.keywords, { x: 0, y: 0 }, 0, true));
+  if (def.description) root.items.push(propNode("ki_description", def.description, { x: 0, y: 0 }, 0, true));
+  const body = list(sym("symbol"), str(`${def.libId.split(":")[1] ?? def.libId}_0_1`));
+  for (const g of def.graphics) {
+    const n = graphicNode(g);
+    if (n) body.items.push(n);
+  }
+  root.items.push(body);
+  const pinUnit = list(sym("symbol"), str(`${def.libId.split(":")[1] ?? def.libId}_1_1`));
+  for (const p of def.pins) pinUnit.items.push(pinNode(p));
+  root.items.push(pinUnit);
+  return root;
+}
+
 // #region schematic serialization
 export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxList>): string {
   const root: SxList = list(sym("kicad_sch"));
@@ -198,7 +263,11 @@ export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxLi
   const libSymsNode = list(sym("lib_symbols"));
   for (const libId of usedLibIds) {
     const raw = libRaw[libId];
+    // Fall back to emitting from the model so runtime-declared parts still
+    // embed a valid definition instead of silently vanishing on save.
+    const def = schem.libSymbols[libId];
     if (raw) libSymsNode.items.push(raw);
+    else if (def) libSymsNode.items.push(emitLibSymbol(def));
   }
   push(libSymsNode);
 

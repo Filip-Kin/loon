@@ -11,6 +11,8 @@ import { join } from "node:path";
 import type { Schematic } from "@loon/shared/schematic";
 import type { Op } from "@loon/shared/ops";
 import { moduleSummaries } from "@loon/shared/modules";
+import { pinBudget, formatBudget } from "@loon/shared/pinbudget";
+import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
 
 const CLAUDE_BIN = process.env.LOON_CLAUDE_BIN || "claude";
@@ -26,9 +28,30 @@ function partsContext(): string {
   const lines: string[] = [];
   for (const [libId, def] of Object.entries(defs)) {
     const pins = def.pins.map((p) => `${p.number}:${p.name}`).join(",");
-    lines.push(`- ${libId} (ref ${def.refPrefix}) ${def.description}${pins ? ` pins[${pins}]` : ""}`);
+    const part = library.get(libId)?.part;
+    const price = part?.priceUsd !== undefined ? ` $${part.priceUsd.toFixed(2)}ea${part.mpn ? ` (${part.mpn})` : ""}` : "";
+    lines.push(`- ${libId} (ref ${def.refPrefix})${price} ${def.description}${pins ? ` pins[${pins}]` : ""}`);
   }
   return lines.join("\n");
+}
+
+// What the design has already spent of its MCU pins, and what that leaves.
+// Without this the assistant guesses at questions like "do I have enough ADC
+// channels", which is exactly the kind of guess that costs a board spin.
+function budgetContext(schem: Schematic): string {
+  const budgets = pinBudget(schem);
+  if (budgets.length === 0) return "(no MCU placed yet)";
+  return budgets.map(formatBudget).join("\n");
+}
+
+function bomContext(schem: Schematic): string {
+  const bom = buildBom(schem, (libId) => {
+    const part = library.get(libId)?.part;
+    if (!part) return undefined;
+    return { priceUsd: part.priceUsd, mpn: part.mpn, note: part.priceNote };
+  });
+  if (bom.lines.length === 0) return "(empty sheet)";
+  return formatBom(bom);
 }
 
 function modulesContext(): string {
@@ -68,7 +91,12 @@ CRITICAL RULES:
 - Give every add_symbol an explicit unique "ref". Use standard prefixes: R (resistor), C (cap), L (inductor), D (diode/LED), Q (transistor), SW (switch), J (connector), and #PWR01/#PWR02/... for power symbols (GND/+5V/+3V3). Each power symbol instance needs its own #PWRxx.
 - In connect_pins, use exactly the refs you assigned above.
 - Use pin NUMBERS from the parts list [pins number:name]. Power symbols have a single pin, number "1". Pin names also work as a fallback.
-- Order ops so every symbol referenced by connect_pins was added earlier in the same list.`;
+- Order ops so every symbol referenced by connect_pins was added earlier in the same list.
+- {"op":"define_symbol","libId":"Sensor:MY_PART","refPrefix":"U","value":"MY_PART","description":"...","footprint":"Package_SO:SOIC-8_3.9x4.9mm_P1.27mm","pins":[{"number":"1","name":"VCC","type":"power_in","side":"left"},{"number":"2","name":"SDA","side":"right"}]}
+  Declares a part that is not in the catalog. The symbol is generated from the pin list, renders immediately, wires like any other part, and is written into the saved KiCad file.
+
+NEVER SUBSTITUTE A PLACEHOLDER. If the user asks for a chip, module or connector that is not in the parts list, emit define_symbol with its real pinout from the datasheet and then use it. Do not drop in a generic pin header "as a placeholder", do not tell the user to swap a part later, and do not ask them to supply a symbol. A design the user cannot manufacture as-drawn is a failed answer: the board they order must have the chip on it.
+Pin side hint for define_symbol: power and inputs on the left, outputs and buses on the right; the body and pin geometry are generated for you.`;
 
 function buildPrompt(userMessage: string, schem: Schematic): string {
   return `You are the schematic design assistant inside Loon, an electronics CAD tool.
@@ -87,6 +115,20 @@ ${partsContext()}
 
 CURRENT SCHEMATIC:
 ${schematicContext(schem)}
+
+MCU PIN BUDGET:
+${budgetContext(schem)}
+
+CURRENT BOM AND COST:
+${bomContext(schem)}
+
+ANSWERING DESIGN QUESTIONS:
+If the user asks a question rather than giving an instruction ("how much would X cost", "do I have enough pins", "can I do Y on board"), answer it in "message" and return an empty ops array. Such an answer must contain:
+- the parts it needs, with quantity and the unit price from the parts list, and a total in dollars. Say when a price is an estimate rather than a live quote.
+- what it costs in MCU pins, checked against the pin budget above, and whether a multiplexer or an I2C part is needed to avoid running out.
+- the one design catch that matters, in a sentence.
+Then offer to build it. Keep it to a short list a person reads in ten seconds, not an essay. Plain text, no markdown tables.
+If the user gives an instruction, do the work with ops and keep "message" to one line.
 
 USER REQUEST:
 ${userMessage}

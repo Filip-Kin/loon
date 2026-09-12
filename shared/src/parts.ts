@@ -36,6 +36,11 @@ export interface PartSummary {
   keywords: string;
   footprints: string[];
   sources: SourceAvailability[];
+  // Unit price used for BOM costing. Seeded estimates today; replaced by live
+  // supplier data when the DigiKey/Mouser keys are wired in.
+  priceUsd?: number;
+  priceNote?: string;
+  mpn?: string;
 }
 
 export interface PartSearchQuery {
