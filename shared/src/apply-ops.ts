@@ -67,12 +67,72 @@ function segmentHitsBox(a: Point, b: Point, box: { min: Point; max: Point }): bo
   return lo.x <= box.max.x && hi.x >= box.min.x && lo.y <= box.max.y && hi.y >= box.min.y;
 }
 
-function routeIsClear(pts: Point[], obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[] }): boolean {
+// Candidate shapes, in order of how tidy they look: straight, the two L bends,
+// a Z through the middle or a quarter of the way along, then detours through a
+// channel above, below or beside both pins. Trying one shape and giving up is
+// why a sheet ends up joined entirely by labels.
+function routeCandidates(from: Point, to: Point): Point[][] {
+  const out: Point[][] = [routeOrthogonal(from, to), [from, { x: from.x, y: to.y }, to]];
+  for (const f of [0.5, 0.3, 0.7]) {
+    const mx = from.x + (to.x - from.x) * f;
+    const my = from.y + (to.y - from.y) * f;
+    out.push([from, { x: mx, y: from.y }, { x: mx, y: to.y }, to]);
+    out.push([from, { x: from.x, y: my }, { x: to.x, y: my }, to]);
+  }
+  for (const d of [5.08, 10.16, 15.24, 20.32]) {
+    const above = Math.min(from.y, to.y) - d;
+    const below = Math.max(from.y, to.y) + d;
+    const left = Math.min(from.x, to.x) - d;
+    const right = Math.max(from.x, to.x) + d;
+    out.push([from, { x: from.x, y: above }, { x: to.x, y: above }, to]);
+    out.push([from, { x: from.x, y: below }, { x: to.x, y: below }, to]);
+    out.push([from, { x: left, y: from.y }, { x: left, y: to.y }, to]);
+    out.push([from, { x: right, y: from.y }, { x: right, y: to.y }, to]);
+  }
+  return out;
+}
+
+// A route must never cross a pin that is not on its net - that is a short.
+// Crossing a symbol body is only ugly, so it is avoided first and accepted
+// second, rather than being a reason to give up and drop a label.
+function pickRoute(
+  from: Point,
+  to: Point,
+  obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[] },
+): Point[] | undefined {
+  const candidates = routeCandidates(from, to);
+  return (
+    candidates.find((r) => routeIsClear(r, obstacles)) ??
+    candidates.find((r) => routeIsClear(r, { pins: obstacles.pins, boxes: [], wires: obstacles.wires }))
+  );
+}
+
+function routeIsClear(
+  pts: Point[],
+  obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[]; wires?: Point[][] },
+): boolean {
+  // A pin sitting exactly on a corner is on neither segment's interior, so it
+  // has to be checked against the corners themselves. Missing this merges two
+  // nets at a bend and the short is invisible on the sheet.
+  for (let i = 1; i < pts.length - 1; i++) {
+    for (const p of obstacles.pins) {
+      if (Math.abs(p.x - pts[i].x) <= CLEAR_TOL && Math.abs(p.y - pts[i].y) <= CLEAR_TOL) return false;
+    }
+  }
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1];
     const b = pts[i];
     for (const p of obstacles.pins) if (pointOnSegment(p, a, b, CLEAR_TOL)) return false;
     for (const box of obstacles.boxes) if (segmentHitsBox(a, b, box)) return false;
+    // Two wires crossing mid-span do not connect, but a corner or an end
+    // landing on another wire does. Either way round is a net merged by
+    // accident, so both are checked.
+    for (const w of obstacles.wires ?? []) {
+      for (let j = 1; j < w.length; j++) {
+        for (const corner of [a, b]) if (pointOnSegment(corner, w[j - 1], w[j], CLEAR_TOL)) return false;
+        for (const v of [w[j - 1], w[j]]) if (pointOnSegment(v, a, b, CLEAR_TOL)) return false;
+      }
+    }
   }
   return true;
 }
@@ -200,14 +260,7 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
           obstacles.push(at);
         }
       }
-      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-      const candidates: Point[][] = [
-        routeOrthogonal(from, to),
-        [from, { x: from.x, y: to.y }, to],
-        [from, { x: mid.x, y: from.y }, { x: mid.x, y: to.y }, to],
-        [from, { x: from.x, y: mid.y }, { x: to.x, y: mid.y }, to],
-      ];
-      const clear = candidates.find((r) => routeIsClear(r, { pins: obstacles, boxes: [] }));
+      const clear = pickRoute(from, to, { pins: obstacles, boxes: [], wires: schem.wires.map((w) => w.pts) });
       if (clear) {
         const uuid = newUuid();
         schem.wires.push({ uuid, pts: clear });
@@ -459,21 +512,13 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
               if (d < bestD) { bestD = d; bestIdx = i; }
             }
             const next = remaining.splice(bestIdx, 1)[0];
-            // Candidate routes, cheapest-looking first: straight, both L
-            // shapes, then a Z through the channel between them.
-            const mid = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 };
-            const candidates: Point[][] = [
-              routeOrthogonal(cur, next),
-              [cur, { x: cur.x, y: next.y }, next],
-              [cur, { x: mid.x, y: cur.y }, { x: mid.x, y: next.y }, next],
-              [cur, { x: cur.x, y: mid.y }, { x: next.x, y: mid.y }, next],
-            ];
             const onNet = new Set(pts.map((pp) => `${pp.at.x},${pp.at.y}`));
             const obstacles = {
               pins: allPinPoints.filter((pp) => !onNet.has(`${pp.at.x},${pp.at.y}`)).map((pp) => pp.at),
               boxes: bodyBoxes,
+              wires: schem.wires.map((w) => w.pts),
             };
-            const clear = candidates.find((r) => routeIsClear(r, obstacles));
+            const clear = pickRoute(cur, next, obstacles);
             if (clear) {
               schem.wires.push({ uuid: newUuid(), pts: clear });
             } else {
