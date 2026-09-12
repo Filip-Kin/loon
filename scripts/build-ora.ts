@@ -6,7 +6,7 @@
 // Run: bun run scripts/build-ora.ts <project> [board]
 import { library } from "../server/src/services/library";
 import { emptySchematic, type Schematic, type SymbolInstance } from "@loon/shared/schematic";
-import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
+import { applyOps, autowireSheet, type LibResolver } from "@loon/shared/apply-ops";
 import { serializeSchematic } from "@loon/shared/kicad-sch";
 import { buildNetlist } from "@loon/shared/netlist";
 import { runErc, formatErc } from "@loon/shared/erc";
@@ -169,6 +169,10 @@ export function buildOra(): Schematic {
     mcuOps.push({ op: "add_label", text: net, at, kind: "local" });
   }
   applyOps(schem, mcuOps, resolve);
+
+  // Draw the connections between the blocks, not just inside them.
+  const wired = autowireSheet(schem, resolve);
+  console.log(`autowire: ${wired.drawn} drawn, ${wired.skipped} left joined by name`);
   return schem;
 }
 

@@ -98,7 +98,7 @@ function routeCandidates(from: Point, to: Point): Point[][] {
 function pickRoute(
   from: Point,
   to: Point,
-  obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[] },
+  obstacles: { pins: Point[]; boxes: { min: Point; max: Point }[]; wires?: Point[][] },
 ): Point[] | undefined {
   const candidates = routeCandidates(from, to);
   return (
@@ -403,6 +403,13 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       return { ok: true };
     }
 
+    case "autowire": {
+      const res = autowireSheet(schem, resolveBase, { maxSpan: op.maxSpan, includeRails: op.includeRails });
+      return res.drawn > 0
+        ? { ok: true }
+        : { ok: false, error: `nothing could be routed cleanly (${res.skipped} connections left joined by name)` };
+    }
+
     case "clear_net": {
       const nl = buildNetlist(schem, (libId) => resolve(libId)?.def);
       const net = nl.nets.find((n) => n.name === op.net);
@@ -545,6 +552,75 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
     default:
       return { ok: false, error: `Unknown op` };
   }
+}
+
+// #region autowire
+// Wiring inside a block is drawn as the block is built, but the connections
+// between blocks were left to labels, so a sheet looked like a set of islands.
+// This routes every net that is not a supply rail: nearest pin to nearest pin,
+// with the same rule that a wire may never cross a pin that is not on its net.
+// Anything it cannot route cleanly stays joined by name, which is still correct
+// and still readable.
+export function autowireSheet(
+  schem: Schematic,
+  resolveBase: LibResolver,
+  opts: { maxSpan?: number; includeRails?: boolean } = {},
+): { drawn: number; skipped: number } {
+  const resolve: LibResolver = (libId) => {
+    const hit = resolveBase(libId);
+    if (hit) return hit;
+    const def = schem.libSymbols[libId];
+    return def ? { def } : undefined;
+  };
+  const maxSpan = opts.maxSpan ?? 400;
+  const nl = buildNetlist(schem, (libId) => resolve(libId)?.def);
+
+  // Every pin on the sheet, so a route can be checked against the ones that are
+  // not on the net being drawn.
+  const allPins: { at: Point; key: string }[] = [];
+  for (const inst of schem.symbols) {
+    const def = resolve(inst.libId)?.def;
+    if (!def) continue;
+    const ref = inst.properties.Reference ?? "";
+    for (const pin of def.pins) allPins.push({ at: pinWorld(pin, inst), key: `${ref}:${pin.number}` });
+  }
+  const bodyBoxes: { min: Point; max: Point }[] = [];
+  for (const inst of schem.symbols) {
+    const def = resolve(inst.libId)?.def;
+    if (def) bodyBoxes.push(instanceBBox(def, { at: inst.at, rotation: inst.rotation, mirror: inst.mirror }));
+  }
+
+  let drawn = 0;
+  let skipped = 0;
+  for (const net of nl.nets) {
+    if (!opts.includeRails && net.isPower) continue;
+    if (net.pins.length < 2) continue;
+    const onNet = new Set(net.pins.map((p) => `${p.ref}:${p.pin}`));
+    const obstaclePins = allPins.filter((p) => !onNet.has(p.key)).map((p) => p.at);
+
+    // Chain the pins nearest-first, which is the shortest sensible ordering
+    // without solving a travelling salesman on every net.
+    const remaining = net.pins.map((p) => p.at).slice(1);
+    let cur = net.pins[0].at;
+    while (remaining.length) {
+      let bestIdx = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < remaining.length; i++) {
+        const d = Math.abs(remaining[i].x - cur.x) + Math.abs(remaining[i].y - cur.y);
+        if (d < bestD) { bestD = d; bestIdx = i; }
+      }
+      const next = remaining.splice(bestIdx, 1)[0];
+      if (bestD <= maxSpan) {
+        const route = pickRoute(cur, next, { pins: obstaclePins, boxes: bodyBoxes, wires: schem.wires.map((w) => w.pts) });
+        if (route) {
+          schem.wires.push({ uuid: newUuid(), pts: route });
+          drawn++;
+        } else skipped++;
+      } else skipped++;
+      cur = next;
+    }
+  }
+  return { drawn, skipped };
 }
 
 export function applyOps(schem: Schematic, ops: Op[], resolve: LibResolver): { results: OpResult[]; createdUuids: string[] } {

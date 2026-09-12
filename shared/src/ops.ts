@@ -42,6 +42,9 @@ export type Op =
   // This is the repair for a net that swallowed the board, where "keeping the
   // connection" would keep the fault.
   | { op: "clear_net"; net: string }
+  // Draw the wiring between blocks. Nets that cannot be routed without crossing
+  // a pin stay joined by name.
+  | { op: "autowire"; maxSpan?: number; includeRails?: boolean }
   // Re-expand a block with new parameters. Its old parts are removed first, so
   // hand edits inside the block are lost - the UI must confirm.
   | { op: "set_block_params"; blockId: string; params: Record<string, string | number> };

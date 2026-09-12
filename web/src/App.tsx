@@ -15,6 +15,7 @@ import type { ErcIssue } from "@loon/shared/erc";
 import { makeClientResolver } from "./lib/resolver";
 import { applyOps } from "@loon/shared/apply-ops";
 import type { Schematic, LibSymbol, Point } from "@loon/shared/schematic";
+import { instanceBBox } from "@loon/shared/geometry";
 import type { Op, PinRef } from "@loon/shared/ops";
 import type { PartSummary } from "@loon/shared/parts";
 import type { ProjectMeta } from "../../server/src/services/storage";
@@ -32,6 +33,7 @@ export function App() {
   const [tool, setTool] = useState<Tool>("select");
   const [placingLibId, setPlacingLibId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ x: -320, y: -260, scale: 5 });
+  const fittedFor = useRef<string>("");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -227,6 +229,31 @@ export function App() {
     setBusy(false);
   }
 
+  // Fit the whole schematic when a board is opened. A design that starts
+  // off-screen looks like an empty sheet.
+  useEffect(() => {
+    if (!schem || schem.symbols.length === 0) return;
+    const key = `${projectName}/${boardName}/${schem.uuid}`;
+    if (fittedFor.current === key) return;
+    fittedFor.current = key;
+    let min = { x: Infinity, y: Infinity };
+    let max = { x: -Infinity, y: -Infinity };
+    for (const inst of schem.symbols) {
+      const def = renderDefs[inst.libId];
+      if (!def) continue;
+      const b = instanceBBox(def, { at: inst.at, rotation: inst.rotation, mirror: inst.mirror });
+      min = { x: Math.min(min.x, b.min.x), y: Math.min(min.y, b.min.y) };
+      max = { x: Math.max(max.x, b.max.x), y: Math.max(max.y, b.max.y) };
+    }
+    if (!isFinite(min.x)) return;
+    const el = document.querySelector(".canvas-wrap");
+    const w = el?.clientWidth ?? window.innerWidth - 600;
+    const h = el?.clientHeight ?? window.innerHeight - 120;
+    const pad = 24;
+    const scale = Math.min(8, Math.max(0.25, Math.min(w / (max.x - min.x + pad), h / (max.y - min.y + pad))));
+    setViewport({ scale, x: w / 2 - ((min.x + max.x) / 2) * scale, y: h / 2 - ((min.y + max.y) / 2) * scale });
+  }, [schem, renderDefs, projectName, boardName]);
+
   // #region checks
   async function runCheck() {
     if (!schem) return;
@@ -385,6 +412,7 @@ export function App() {
         {view === "schematic" && <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>}
         {placingLibId && <span className="status">Placing {placingLibId}{isMobile ? " - tap sheet" : " - click sheet (Esc to stop)"}</span>}
         <div className="spacer" />
+        <button className="desktop-only" onClick={() => { fittedFor.current = ""; setSchem((s) => (s ? { ...s } : s)); }} title="Fit the whole sheet">Fit</button>
         <button className="desktop-only" onClick={undo}>Undo</button>
         <button className="desktop-only" onClick={redo}>Redo</button>
         <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "loading..."}</span>
