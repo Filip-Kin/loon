@@ -86,6 +86,51 @@ export function autoroute(
     }
   }
 
+  // Copper already on the board - a previous pass, or a trace someone drew by
+  // hand - is an obstacle like any other. Without this a second routing pass
+  // lays its tracks straight across the first one's.
+  const markExisting = () => {
+    const layerOf = (name: string) => (name === "B.Cu" ? 1 : 0);
+    for (const t of board.tracks) {
+      const id = netId.get(t.net) ?? BLOCKED;
+      const layer = layerOf(t.layer);
+      const steps = Math.max(1, Math.ceil(Math.hypot(t.end.x - t.start.x, t.end.y - t.start.y) / pitch));
+      const r = Math.ceil((t.width / 2 + clearance) / pitch);
+      for (let k = 0; k <= steps; k++) {
+        const x = cellX(t.start.x + ((t.end.x - t.start.x) * k) / steps);
+        const y = cellY(t.start.y + ((t.end.y - t.start.y) * k) / steps);
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dy = -r; dy <= r; dy++) {
+            const cx2 = x + dx;
+            const cy2 = y + dy;
+            if (cx2 < 0 || cy2 < 0 || cx2 >= W || cy2 >= H) continue;
+            const cell = idx(cx2, cy2, layer);
+            if (owner[cell] === FREE || owner[cell] === id) owner[cell] = id;
+            else if (owner[cell] !== id) owner[cell] = BLOCKED;
+          }
+        }
+      }
+    }
+    for (const v of board.vias) {
+      const id = netId.get(v.net) ?? BLOCKED;
+      const r = Math.ceil((v.size / 2 + clearance) / pitch);
+      const x = cellX(v.at.x);
+      const y = cellY(v.at.y);
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const cx2 = x + dx;
+          const cy2 = y + dy;
+          if (cx2 < 0 || cy2 < 0 || cx2 >= W || cy2 >= H) continue;
+          for (const l of [0, 1]) {
+            const cell = idx(cx2, cy2, l);
+            if (owner[cell] === FREE || owner[cell] === id) owner[cell] = id;
+            else if (owner[cell] !== id) owner[cell] = BLOCKED;
+          }
+        }
+      }
+    }
+  };
+
   // #region obstacles
   const padCells = new Map<string, { cx: number; cy: number; layer: number }[]>();
   // Where each pad entry cell has to reach to actually touch copper. A grid
@@ -263,6 +308,8 @@ export function autoroute(
     }
     return true;
   }
+
+  markExisting();
 
   // #region search
   const prev = new Int32Array(LAYER * 2);
