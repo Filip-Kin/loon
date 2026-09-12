@@ -668,36 +668,6 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     }
   });
 
-  // #region mounting holes
-  // A board with 12AWG pulling on its terminals needs to be bolted down.
-  const holeFp = Object.keys(footprints).find((k) => /MountingHole_3\.2mm/.test(k));
-  if (holeFp) {
-    const spots: Point[] = [
-      { x: HOLE_INSET, y: HOLE_INSET },
-      { x: boardW - HOLE_INSET, y: HOLE_INSET },
-      { x: HOLE_INSET, y: realH - HOLE_INSET },
-      { x: boardW - HOLE_INSET, y: realH - HOLE_INSET },
-    ];
-    board.footprints = board.footprints.filter((f) => !/^H\d+$/.test(f.ref));
-    spots.forEach((p, i) => {
-      board.footprints.push({
-        uuid: crypto.randomUUID(),
-        ref: `H${i + 1}`,
-        value: "M3 mount",
-        libId: holeFp,
-        at: { x: snap(p.x), y: snap(p.y) },
-        rotation: 0,
-        side: "F",
-        padNets: {},
-      });
-    });
-    notes.push("4 M3 mounting holes at the corners");
-  }
-
-  // #region guard
-  // Nothing should overlap by now. If something does it is a bug, and a part
-  // parked below the board is easier to find than two parts on top of each
-  // other - but say so, loudly, in the notes.
   const rectOf = (f: PlacedFootprint) => {
     const fp = fpOf(f);
     const box = fp?.courtyard ?? fp?.bbox;
@@ -723,6 +693,60 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     return { x1: Math.min(...xs) - pad, y1: Math.min(...ys) - pad, x2: Math.max(...xs) + pad, y2: Math.max(...ys) + pad };
   };
   const hits = (a: ReturnType<typeof rectOf>, b: ReturnType<typeof rectOf>) => a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+
+  // #region mounting holes
+  // A board with 12AWG pulling on its terminals needs to be bolted down.
+  const holeFp = Object.keys(footprints).find((k) => /MountingHole_3\.2mm/.test(k));
+  if (holeFp) {
+    const spots: Point[] = [
+      { x: HOLE_INSET, y: HOLE_INSET },
+      { x: boardW - HOLE_INSET, y: HOLE_INSET },
+      { x: HOLE_INSET, y: realH - HOLE_INSET },
+      { x: boardW - HOLE_INSET, y: realH - HOLE_INSET },
+    ];
+    board.footprints = board.footprints.filter((f) => !/^H\d+$/.test(f.ref));
+    // A corner is where a hole wants to be, not where it has to be. Walk it
+    // inward until it is clear of everything - a hole through a connector is
+    // not a mounting point.
+    const taken = board.footprints.map(rectOf);
+    const holeR = (sizeOf(footprints[holeFp]).w || 3.4) / 2 + 0.5;
+    const free = (p: Point) =>
+      !taken.some((t) => hits(t, { x1: p.x - holeR, y1: p.y - holeR, x2: p.x + holeR, y2: p.y + holeR }));
+    const settle = (p: Point): Point | undefined => {
+      const inX = p.x < boardW / 2 ? 1 : -1;
+      const inY = p.y < realH / 2 ? 1 : -1;
+      for (let step = 0; step <= 24; step += 2) {
+        for (const c of [
+          { x: p.x + inX * step, y: p.y },
+          { x: p.x, y: p.y + inY * step },
+          { x: p.x + inX * step, y: p.y + inY * step },
+        ]) {
+          if (free(c)) return c;
+        }
+      }
+      return undefined;
+    };
+    const settled = spots.map(settle).filter((p): p is Point => !!p);
+    if (settled.length < spots.length) notes.push(`${spots.length - settled.length} mounting holes had nowhere clear to go`);
+    settled.forEach((p, i) => {
+      board.footprints.push({
+        uuid: crypto.randomUUID(),
+        ref: `H${i + 1}`,
+        value: "M3 mount",
+        libId: holeFp,
+        at: { x: snap(p.x), y: snap(p.y) },
+        rotation: 0,
+        side: "F",
+        padNets: {},
+      });
+    });
+    notes.push("4 M3 mounting holes at the corners");
+  }
+
+  // #region guard
+  // Nothing should overlap by now. If something does it is a bug, and a part
+  // parked below the board is easier to find than two parts on top of each
+  // other - but say so, loudly, in the notes.
   const accepted: ReturnType<typeof rectOf>[] = [];
   const displaced: string[] = [];
   let spareX = EDGE;
