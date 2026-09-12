@@ -228,13 +228,39 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
         sym("zone"),
         node("net", num(netIndex.get(z.net) ?? 0)),
         node("net_name", str(z.net)),
-        node("layer", str(z.layer)),
+        // KiCad writes a zone's layer as "layers", plural, even for one layer.
+        // Read back from "layer" the zone lands on no layer at all, fills into
+        // nothing, and connects nothing.
+        node("layers", str(z.layer)),
         node("uuid", str(z.uuid)),
         node("hatch", sym("edge"), num(0.5)),
-        list(sym("connect_pads"), node("clearance", num(board.rules.minClearance))),
+        ...(z.priority ? [node("priority", num(z.priority))] : []),
+        // Solid connections to the zone's own pads, so KiCad does not expect
+        // thermal spokes and then report them as starved. The clearance here is
+        // the gap held around pads that are NOT on this net: zero shorts the
+        // pour to every pad it touches.
+        list(sym("connect_pads"), sym("yes"), node("clearance", num(board.rules.minClearance))),
         node("min_thickness", num(board.rules.minTrackWidth)),
-        list(sym("fill"), sym("yes"), node("thermal_gap", num(0.5)), node("thermal_bridge_width", num(0.5))),
+        // Without this KiCad reads the zone as a legacy fill, strokes the
+        // outline instead of filling the area, and the pour connects nothing.
+        node("filled_areas_thickness", sym("no")),
+        // Islands: a scrap of pour between two tracks that touches no pad is
+        // not copper, it is an antenna. Mode 0 drops them.
+        list(
+          sym("fill"),
+          sym("yes"),
+          node("thermal_gap", num(0.5)),
+          node("thermal_bridge_width", num(0.5)),
+          node("island_removal_mode", num(0)),
+        ),
         list(sym("polygon"), poly),
+        ...(z.filled ?? []).map((shape) =>
+          list(
+            sym("filled_polygon"),
+            node("layer", str(z.layer)),
+            list(sym("pts"), ...shape.map((p) => node("xy", num(p.x), num(p.y)))),
+          ),
+        ),
       ),
     );
   }

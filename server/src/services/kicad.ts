@@ -62,3 +62,40 @@ export async function runKicadDrc(project: string, unit = ""): Promise<KicadDrcR
   await storage.deleteFile(project, "drc.json", unit);
   return { ok: violations.filter((v) => v.severity === "error").length === 0, violations, unconnected, raw: out + err };
 }
+
+// #region zone fill
+// KiCad's command line will not fill a zone, but the container ships pcbnew, and
+// pcbnew has the same filler the GUI uses. A zone with no fill is a zone the fab
+// never sees, so this runs after every board write.
+const FILL_SCRIPT = `
+import pcbnew
+
+b = pcbnew.LoadBoard('/work/board.kicad_pcb')
+zones = b.Zones()
+if len(zones) == 0:
+    print('no zones')
+    raise SystemExit
+
+pcbnew.ZONE_FILLER(b).Fill(zones)
+b.BuildConnectivity()
+pcbnew.SaveBoard('/work/board.kicad_pcb', b)
+
+area = 0.0
+for z in zones:
+    area += z.GetFilledArea() / 1e12
+left = b.GetConnectivity().GetUnconnectedCount(True)
+print('filled %d zones, %.0f cm2 of copper, %d connections still open' % (len(zones), area / 100, left))
+`;
+
+export async function fillZones(project: string, unit = ""): Promise<{ ok: boolean; note: string }> {
+  const dir = storage.projectDir(project, unit);
+  const proc = Bun.spawn(
+    [DOCKER, "run", "--rm", "-v", `${dir}:/work`, "-w", "/work", IMAGE, "python3", "-c", FILL_SCRIPT],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const out = await new Response(proc.stdout).text();
+  const err = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  const note = out.trim().split("\n").filter(Boolean).pop() ?? err.trim().slice(0, 120);
+  return { ok: code === 0, note };
+}

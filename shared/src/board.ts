@@ -50,6 +50,11 @@ export interface Zone {
   net: string;
   // Polygon outline; the pour itself is filled by KiCad on open.
   polygon: Point[];
+  // Where two pours share a layer, the higher priority takes the area.
+  priority?: number;
+  // The copper, computed by loon. KiCad's command line will not fill a zone,
+  // so a zone without this is a zone the fab never sees.
+  filled?: Point[][];
 }
 
 export interface DesignRules {

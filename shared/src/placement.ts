@@ -514,7 +514,13 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
   const powerSize = sizeRows(powerRows);
   const digitalSize = sizeRows(digitalRows);
   const midUsed = stacked ? Math.max(powerSize.w, digitalSize.w) : powerSize.w + (powerSize.w && digitalSize.w ? ZONE_GAP : 0) + digitalSize.w;
-  const contentW = Math.max(bankW, railBankW + lugZoneW, midUsed + colZoneW, colZoneW + 40, 40);
+  // The left column - lugs and the connectors that sit beside them - is as much
+  // a part of the width as the right one. Leaving it out pushes the middle band
+  // into the right column, and the overlap guard then throws parts off the
+  // board.
+  const connW = leftConns.length ? Math.max(...leftConns.map((c) => c.w)) : 0;
+  const leftZoneW = Math.max(lugZoneW, connW ? connW + ZONE_GAP : 0);
+  const contentW = Math.max(bankW, railBankW + lugZoneW, leftZoneW + midUsed + colZoneW, leftZoneW + colZoneW + 40, 40);
   const otherRows = rowsOf(otherZone, Math.max(contentW - colZoneW, 40));
   const otherSize = sizeRows(otherRows);
 
@@ -571,8 +577,6 @@ export function autoPlace(board: Board, footprints: Record<string, Footprint>, n
     }
     return y;
   };
-  const connW = edgeConnectors.length ? Math.max(...edgeConnectors.map((c) => c.w)) : 0;
-  const leftZoneW = Math.max(lugZoneW, connW ? connW + ZONE_GAP : 0);
   const powerLeft = EDGE + leftZoneW;
   const powerWidth = powerSize.w;
   const digitalLeft = stacked || !powerWidth ? powerLeft : powerLeft + powerWidth + ZONE_GAP;

@@ -11,9 +11,11 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
+import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
+import { planPours, stitchVias } from "@loon/shared/pour";
 import { serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
-import { runKicadDrc } from "../services/kicad";
+import { fillZones, runKicadDrc } from "../services/kicad";
 import { startSpice, startQemu, getSim } from "../services/sim";
 import { buildSpiceDeck, parseWrdata, type SpiceBench } from "@loon/shared/spice";
 import { OSHPARK_2LAYER, OSHPARK_4LAYER, type Board } from "@loon/shared/board";
@@ -639,10 +641,106 @@ const pcbRouter = router({
         notes.push(
           `routed ${r.routed} connections with ${r.tracks.length} tracks and ${r.vias.length} vias in ${r.seconds.toFixed(0)}s; ${r.failed} could not be routed and ${new Set(r.skipped).size} power nets were left for copper`,
         );
+
+        // The copper the router deliberately skipped. Ground goes on the back
+        // of the board and the battery rail on the front, which is what a two
+        // layer power board looks like.
+        // Every net the router left for copper gets a pour, bounded to the
+        // area its own pads occupy, on the layer where most of them sit. The
+        // smaller a pour's area, the higher its priority, so a channel output
+        // wins its own corner from the rail it branches off.
+        const padsOf = (net: string) => board2Pads.get(net) ?? [];
+        const board2Pads = new Map<string, { x: number; y: number; smd: boolean }[]>();
+        for (const f of res.board.footprints) {
+          const fp = footprints[f.libId];
+          for (const [padNum, net] of Object.entries(f.padNets)) {
+            if (!net) continue;
+            const pad = fp?.pads.find((x) => x.number === padNum);
+            // The pad, not the footprint origin. On a 45mm terminal block the
+            // origin is at one end, so a pour bounded by origins misses most of
+            // the pads it is supposed to feed.
+            const at = pad ? padWorld(f, pad.at) : f.at;
+            const arr = board2Pads.get(net) ?? [];
+            arr.push({ x: at.x, y: at.y, smd: (pad?.type ?? "smd") === "smd" });
+            board2Pads.set(net, arr);
+          }
+        }
+        const railNames = [...new Set(r.skipped)].filter((n) => n !== "GND" && padsOf(n).length > 1);
+        const boundsOf = (net: string) => {
+          const pts = padsOf(net);
+          return {
+            x1: Math.min(...pts.map((p) => p.x)) - 6,
+            y1: Math.min(...pts.map((p) => p.y)) - 6,
+            x2: Math.max(...pts.map((p) => p.x)) + 6,
+            y2: Math.max(...pts.map((p) => p.y)) + 6,
+          };
+        };
+        const areaOf = (net: string) => {
+          const b = boundsOf(net);
+          return (b.x2 - b.x1) * (b.y2 - b.y1);
+        };
+        // Ground on both layers: most pads are surface mount on the front, and a
+        // pour they cannot reach connects nothing. The through-hole terminals
+        // stitch the two together.
+        const volts = (n: string) => {
+          const m = /^\+(\d+)(?:V(\d+))?/.exec(n);
+          return m ? parseFloat(`${m[1]}.${m[2] ?? 0}`) : 0;
+        };
+        const railName = [...railNames].sort((a, b) => volts(b) - volts(a))[0];
+        const pourNets: { name: string; layer: string; priority?: number; bounds?: { x1: number; y1: number; x2: number; y2: number } }[] = [
+          { name: "GND", layer: "B.Cu" },
+          { name: "GND", layer: "F.Cu" },
+        ];
+        // One layer each: the front when the net has surface mount pads to
+        // reach, the back otherwise. Two zones for one small net just makes two
+        // islands, and KiCad throws away an island that touches nothing.
+        // A net whose pads are spread across the board is not a pour, it is a
+        // wide trace, and it is left in the ratsnest until the router grows one.
+        const ranked = railNames.filter((n) => areaOf(n) < 6000).sort((a, b) => areaOf(b) - areaOf(a));
+        // Rails go on the front. The back is the ground plane, and a rail pour
+        // carved out of it strands every ground pin it surrounds - which on a
+        // terminal block is every other pin.
+        ranked.forEach((net, i) => {
+          pourNets.push({ name: net, layer: "F.Cu", priority: i + 1, bounds: boundsOf(net) });
+        });
+        const spread = railNames.filter((n) => areaOf(n) >= 6000 && n !== railName);
+        if (spread.length) notes.push(`${spread.length} rails are spread too far to pour (${spread.slice(0, 4).join(", ")}); they need wide traces`);
+
+        // Stitch only where the ground pour will actually be: outside the areas
+        // another pour owns and outside every part's keepout.
+        const avoid = pourNets.filter((n) => n.bounds).map((n) => n.bounds!);
+        for (const f of res.board.footprints) {
+          const fp = footprints[f.libId];
+          for (const ring of fp?.keepouts ?? []) {
+            const rad = (-f.rotation * Math.PI) / 180;
+            const pts = ring.map((pt) => ({
+              x: f.at.x + pt.x * Math.cos(rad) - pt.y * Math.sin(rad),
+              y: f.at.y + pt.x * Math.sin(rad) + pt.y * Math.cos(rad),
+            }));
+            avoid.push({
+              x1: Math.min(...pts.map((p2) => p2.x)),
+              y1: Math.min(...pts.map((p2) => p2.y)),
+              x2: Math.max(...pts.map((p2) => p2.x)),
+              y2: Math.max(...pts.map((p2) => p2.y)),
+            });
+          }
+        }
+        const stitch = stitchVias(res.board, footprints, { net: "GND", avoid });
+        notes.push(stitch.note);
+        const p = planPours(res.board, nlb, { nets: pourNets });
+        res.board.zones.push(...p.zones);
+        notes.push(...p.notes);
       }
       await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
       await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)), unit);
       await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"), unit);
+
+      // A zone outline is not copper until it is filled, and only KiCad's own
+      // filler produces what the fab will get.
+      if (res.board.zones.length) {
+        const fill = await fillZones(input.project, unit);
+        notes.push(fill.ok ? fill.note : `zone fill failed: ${fill.note}`);
+      }
       return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes };
     }),
 
