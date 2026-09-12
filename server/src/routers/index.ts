@@ -309,6 +309,8 @@ interface AiJob {
   files?: string[];
   log?: string;
   touched?: { board?: boolean; firmware?: boolean; sim?: boolean };
+  // Which board the assistant actually edited, so the UI can follow it there.
+  editedBoard?: string;
 }
 const aiJobs = new Map<string, AiJob>();
 
@@ -347,16 +349,42 @@ const aiRouter = router({
           job.message = "Thinking about the whole board...";
           const state = await projectState(project, schem, unit);
           const ai = await generateOps(input.message, schem, state);
-          const { results } = applyOps(schem, ai.ops, makeResolver(schem));
+
+          // A board named in the reply wins over the one on screen, and a board
+          // created in this same reply has to exist before its ops land.
+          const creates = ai.actions.filter((a) => a.action === "create_board");
+          for (const c of creates) {
+            const detail = await runAiAction(c, project, schem, job, unit);
+            step("create board", true, detail);
+          }
+          const target = ai.board !== undefined ? ai.board : unit;
+          let sheet = schem;
+          if (target !== unit) {
+            // Edit that board's own schematic, not the one the user has open.
+            const other = parseSchematic(await storage.read(project, target));
+            sheet = other.schem;
+            projectRaw.set(`${project}/${target}`, other.libRaw);
+          }
+          const { results } = applyOps(sheet, ai.ops, makeResolver(sheet));
           job.ops = ai.ops;
-          job.schem = schem;
           job.results = results;
+          job.editedBoard = target;
           job.message = ai.message;
+          if (target === unit) {
+            job.schem = sheet;
+          } else {
+            // Persist it: the user is not looking at this sheet, so nothing
+            // else is going to save it.
+            const usedLibIds = Array.from(new Set(sheet.symbols.map((x) => x.libId)));
+            const cached = projectRaw.get(`${project}/${target}`) ?? {};
+            await storage.write(project, serializeSchematic(sheet, { ...cached, ...library.rawMap(usedLibIds) }), target);
+            step(`edited board "${target || "main"}"`, true, `${sheet.symbols.length} parts on that sheet now`);
+          }
 
           // Firmware files first: a later build should compile what was written.
           for (const f of ai.files) {
             if (f.path.includes("board_pins.h")) continue; // generated, never authored
-            await storage.writeFile(project, `firmware/${f.path}`, f.content, unit);
+            await storage.writeFile(project, `firmware/${f.path}`, f.content, target);
             job.files!.push(f.path);
             job.touched!.firmware = true;
           }
@@ -364,9 +392,10 @@ const aiRouter = router({
 
           // Then the actions, in the order the assistant asked for them.
           for (const a of ai.actions) {
+            if (a.action === "create_board") continue; // already run, before the ops
             job.message = `Running ${a.action.replace(/_/g, " ")}...`;
             try {
-              const detail = await runAiAction(a, project, schem, job, unit);
+              const detail = await runAiAction(a, project, sheet, job, target);
               step(a.action.replace(/_/g, " "), true, detail);
             } catch (e: any) {
               step(a.action.replace(/_/g, " "), false, String(e?.message ?? e));
@@ -397,6 +426,7 @@ const aiRouter = router({
         error: job.error,
         steps: job.steps,
         files: job.files,
+        editedBoard: job.editedBoard,
         log: job.log?.slice(-6000),
         touched: job.touched,
       };

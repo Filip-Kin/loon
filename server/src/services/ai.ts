@@ -27,6 +27,9 @@ const AI_TIMEOUT_MS = Number(process.env.LOON_AI_TIMEOUT_MS ?? 900_000);
 
 export interface AiResult {
   message: string;
+  // Which board in the project the ops belong to. Omitted means the one the
+  // user is looking at.
+  board?: string;
   ops: Op[];
   files: { path: string; content: string }[];
   actions: AiAction[];
@@ -43,7 +46,10 @@ export interface AiAction {
     | "run_drc"
     | "build_firmware"
     | "run_qemu"
-    | "run_spice";
+    | "run_spice"
+    | "create_board";
+  // create_board: the board to add to this project.
+  name?: string;
   keepPlacement?: boolean;
   seconds?: number;
   probes?: string[];
@@ -167,8 +173,10 @@ function buildPrompt(userMessage: string, schem: Schematic): string {
 Convert the user's request into schematic edit operations.
 
 OUTPUT CONTRACT: respond with ONLY a single JSON object, no prose, no markdown fences:
-{"message": "<one short sentence for the user>", "ops": [ <op>, ... ], "files": [ {"path":"src/main.cpp","content":"..."} ], "actions": [ <action>, ... ]}
-"ops", "files" and "actions" are all optional; include the ones the request needs.
+{"message": "<one short sentence for the user>", "board": "<board name, optional>", "ops": [ <op>, ... ], "files": [ {"path":"src/main.cpp","content":"..."} ], "actions": [ <action>, ... ]}
+"board", "ops", "files" and "actions" are all optional; include the ones the request needs.
+
+WHICH BOARD YOU ARE EDITING: ops, files and actions all apply to one board. By default that is the board the user has open. To work on a different board in the project - including one you create in this same reply with create_board - set "board" to its name ("" means the main board). Everything in the reply then lands on that board, and the user is switched to it. Never design a second board onto the sheet of the first: if you meant the pendant, say so in "board", or its parts end up mixed into the board the user was looking at.
 
 ${OP_SPEC}
 
@@ -226,7 +234,7 @@ ${userMessage}
 Remember: output only the JSON object.`;
 }
 
-function extractJson(text: string): { message: string; ops: Op[]; files: { path: string; content: string }[]; actions: AiAction[] } {
+function extractJson(text: string): { message: string; board?: string; ops: Op[]; files: { path: string; content: string }[]; actions: AiAction[] } {
   let t = text.trim();
   // Strip code fences if the model added them.
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -246,7 +254,8 @@ function extractJson(text: string): { message: string; ops: Op[]; files: { path:
         .filter((a: any) => typeof a?.action === "string")
     : [];
   const message = typeof parsed.message === "string" ? parsed.message : "";
-  return { message, ops, files, actions };
+  const board = typeof parsed.board === "string" ? parsed.board : undefined;
+  return { message, board, ops, files, actions };
 }
 
 async function runClaude(prompt: string): Promise<string> {
@@ -352,6 +361,6 @@ export async function generateFirmware(
 export async function generateOps(userMessage: string, schem: Schematic, projectState = ""): Promise<AiResult> {
   const prompt = buildPrompt(userMessage, schem) + (projectState ? `\n\nPROJECT STATE:\n${projectState}\n` : "");
   const raw = await runClaude(prompt);
-  const { message, ops, files, actions } = extractJson(raw);
-  return { message, ops, files, actions, raw };
+  const { message, board, ops, files, actions } = extractJson(raw);
+  return { message, board, ops, files, actions, raw };
 }

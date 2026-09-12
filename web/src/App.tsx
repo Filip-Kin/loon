@@ -206,6 +206,11 @@ export function App() {
       setProgress(null);
       if (schem && res.schem) { past.current.push(schem); future.current = []; }
       if (res.schem) setSchem(res.schem as Schematic);
+      // It may have worked on another board in this project; follow it there.
+      if (res.editedBoard !== undefined && res.editedBoard !== boardName) {
+        await openProject(projectName, res.editedBoard);
+        setMessages((m) => [...m, { role: "bot", text: `Switched you to board "${res.editedBoard || "main"}".` }]);
+      }
       const failed = (res.results ?? []).filter((r: any) => !r.ok);
       const lines: string[] = [res.message || `Applied ${(res.ops ?? []).length} operation(s).`];
       for (const st of res.steps ?? []) {
