@@ -9,6 +9,7 @@
 // will be flashed, not a rewrite of it against a mock.
 
 import { storage } from "./storage";
+import { buildEnvs } from "./build";
 
 const DOCKER = process.env.LOON_DOCKER_BIN ?? "docker";
 const SPICE_IMAGE = process.env.LOON_SPICE_IMAGE ?? "loon-spice:latest";
@@ -89,7 +90,31 @@ export function startQemu(project: string, seconds = 12): SimJob {
       await storage.writeFile(project, "sim/.keep", "");
 
       // Build the UART variant: the emulator has no USB peripheral, so the
-      // normal build would boot and then appear silent.
+      // normal build would boot and then appear silent. If the project has no
+      // sim environment - because its platformio.ini was written by hand or by
+      // the assistant - append one rather than overwriting what is there.
+      let envs = await buildEnvs(project);
+      if (!envs.includes("sim")) {
+        let ini = "";
+        try {
+          ini = await storage.readFile(project, "firmware/platformio.ini");
+        } catch {
+          /* no ini yet */
+        }
+        ini += [
+          "",
+          "; Added by loon for the emulator: the classic ESP32 with a UART",
+          "; console, because QEMU models no USB peripheral.",
+          "[env:sim]",
+          "platform = espressif32",
+          "board = esp32dev",
+          "framework = arduino",
+          "monitor_speed = 115200",
+          "",
+        ].join("\n");
+        await storage.writeFile(project, "firmware/platformio.ini", ini);
+        envs = await buildEnvs(project);
+      }
       const build = Bun.spawn(
         [DOCKER, "run", "--rm", "-v", `${dir}:/workspace`, "-v", `${process.env.LOON_PIO_VOLUME ?? "loon-platformio"}:/root/.platformio`, "-w", "/workspace/firmware", PIO_IMAGE, "pio", "run", "-e", "sim"],
         { stdout: "pipe", stderr: "pipe" },

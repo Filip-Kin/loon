@@ -23,13 +23,42 @@ export interface BuildJob {
 
 const jobs = new Map<string, BuildJob>();
 
-// Where PlatformIO drops the images, and where the ESP32 bootloader expects
-// each of them in flash.
-const ARTIFACTS: { file: string; offset: number }[] = [
-  { file: "firmware/.pio/build/board/bootloader.bin", offset: 0x0 },
-  { file: "firmware/.pio/build/board/partitions.bin", offset: 0x8000 },
-  { file: "firmware/.pio/build/board/firmware.bin", offset: 0x10000 },
-];
+// Where the ESP32 bootloader expects each image in flash. The build directory
+// is named after the environment, and the environment is whatever the project's
+// platformio.ini calls it - which the assistant is free to rename - so the
+// artifacts are discovered rather than assumed.
+const OFFSETS: Record<string, number> = {
+  "bootloader.bin": 0x0,
+  "partitions.bin": 0x8000,
+  "firmware.bin": 0x10000,
+};
+
+export async function buildEnvs(project: string): Promise<string[]> {
+  try {
+    const ini = await storage.readFile(project, "firmware/platformio.ini");
+    return [...ini.matchAll(/^\s*\[env:([^\]]+)\]/gm)].map((m) => m[1].trim());
+  } catch {
+    return [];
+  }
+}
+
+// Prefer the environment that was actually built most recently.
+async function findArtifacts(project: string, envs: string[]): Promise<{ path: string; offset: number }[]> {
+  for (const env of envs) {
+    const found: { path: string; offset: number }[] = [];
+    for (const [file, offset] of Object.entries(OFFSETS)) {
+      const path = `firmware/.pio/build/${env}/${file}`;
+      try {
+        await storage.readBinary(project, path);
+        found.push({ path, offset });
+      } catch {
+        /* not every env produces every image */
+      }
+    }
+    if (found.some((f) => f.path.endsWith("firmware.bin"))) return found;
+  }
+  return [];
+}
 
 export function getBuild(id: string): BuildJob | undefined {
   return jobs.get(id);
@@ -74,16 +103,14 @@ export function startBuild(project: string): BuildJob {
         job.error = `pio run exited ${code}`;
         return;
       }
-      const present: { path: string; offset: number }[] = [];
-      for (const a of ARTIFACTS) {
-        try {
-          await storage.readBinary(project, a.file);
-          present.push({ path: a.file, offset: a.offset });
-        } catch {
-          /* a build without this artifact is still usable */
-        }
-      }
+      const envs = await buildEnvs(project);
+      const present = await findArtifacts(project, envs);
       job.artifacts = present;
+      if (present.length === 0) {
+        job.state = "error";
+        job.error = `The build produced no images. Environments found in platformio.ini: ${envs.join(", ") || "none"}.`;
+        return;
+      }
       job.state = "done";
     } catch (e: any) {
       job.state = "error";

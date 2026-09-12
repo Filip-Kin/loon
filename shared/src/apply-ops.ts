@@ -46,6 +46,7 @@ function isRailNet(label: string): boolean {
 // drawn when its route is clear of every other pin and symbol body; otherwise
 // the two ends stay joined by name.
 const CLEAR_TOL = 0.6; // mm
+const near = (a: Point, b: Point) => Math.abs(a.x - b.x) < 0.05 && Math.abs(a.y - b.y) < 0.05;
 
 function pointOnSegment(p: Point, a: Point, b: Point, tol: number): boolean {
   const dx = b.x - a.x;
@@ -183,9 +184,49 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       if (!bp) return { ok: false, error: `${op.b.ref} has no pin ${op.b.pin}` };
       const from = pinWorld(ap, a);
       const to = pinWorld(bp, b);
-      const uuid = newUuid();
-      schem.wires.push({ uuid, pts: routeOrthogonal(from, to) });
-      return { ok: true, createdUuid: uuid };
+
+      // A wire that passes over a pin connects to it. Across a big sheet that
+      // turns one long route into a short between dozens of parts, so a route
+      // is only drawn when it is clear; otherwise the two pins are joined by
+      // name, which is electrically identical and geometrically harmless.
+      const obstacles: Point[] = [];
+      for (const inst of schem.symbols) {
+        const d = resolve(inst.libId)?.def;
+        if (!d) continue;
+        for (const pin of d.pins) {
+          const at = pinWorld(pin, inst);
+          if (near(at, from) || near(at, to)) continue;
+          obstacles.push(at);
+        }
+      }
+      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+      const candidates: Point[][] = [
+        routeOrthogonal(from, to),
+        [from, { x: from.x, y: to.y }, to],
+        [from, { x: mid.x, y: from.y }, { x: mid.x, y: to.y }, to],
+        [from, { x: from.x, y: mid.y }, { x: to.x, y: mid.y }, to],
+      ];
+      const clear = candidates.find((r) => routeIsClear(r, { pins: obstacles, boxes: [] }));
+      if (clear) {
+        const uuid = newUuid();
+        schem.wires.push({ uuid, pts: clear });
+        return { ok: true, createdUuid: uuid };
+      }
+
+      // Reuse a name already on either pin so repeated connects land on one net.
+      const existing =
+        schem.labels.find((l) => near(l.at, from))?.text ?? schem.labels.find((l) => near(l.at, to))?.text;
+      const base = existing ?? `N_${op.a.ref}_${op.a.pin}`.replace(/[^A-Za-z0-9_]/g, "_");
+      let name = base;
+      if (!existing) {
+        let n = 1;
+        while (schem.labels.some((l) => l.text === name && !near(l.at, from) && !near(l.at, to))) name = `${base}_${n++}`;
+      }
+      for (const at of [from, to]) {
+        if (schem.labels.some((l) => l.text === name && near(l.at, at))) continue;
+        schem.labels.push({ uuid: newUuid(), kind: "local", text: name, at, rotation: 0 });
+      }
+      return { ok: true };
     }
 
     case "add_junction": {

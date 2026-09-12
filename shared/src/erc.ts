@@ -114,6 +114,23 @@ export function runErc(schem: Schematic, resolve?: DefResolver, netlist?: Netlis
     }
   }
 
+  // 4b. An implausibly crowded net. A rail legitimately has many pins; a rail
+  // with most of the board on it is a wire that crossed pins on its way across
+  // the sheet, which is the single most destructive mistake here.
+  const partCount = schem.symbols.filter((s) => !s.libId.startsWith("power:")).length;
+  for (const net of nl.nets) {
+    const share = partCount > 0 ? net.pins.length / partCount : 0;
+    if (net.pins.length > 40 && share > 1.5) {
+      issues.push({
+        severity: "error",
+        rule: "net-swallowed-the-board",
+        message: `Net ${net.name} has ${net.pins.length} pins across ${partCount} parts. That is a wire passing over pins rather than a real connection: delete the long wires on this net and join those pins by label instead.`,
+        refs: [],
+        net: net.name,
+      });
+    }
+  }
+
   // 5. Duplicate references: two parts answering to the same name.
   const seen = new Map<string, number>();
   for (const inst of schem.symbols) {
