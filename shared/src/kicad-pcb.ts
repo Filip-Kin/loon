@@ -337,3 +337,32 @@ export function outlineFromText(text: string): Point[] {
   }
   return pts;
 }
+
+// #region zone fills
+// KiCad computes a pour's real copper and writes it back into the board file.
+// Reading it in again is what lets the layout view draw what the fab will get
+// rather than an empty outline with a promise in it.
+export function readZoneFills(text: string): { net: string; layer: string; polys: Point[][] }[] {
+  const root = parse(text);
+  const out: { net: string; layer: string; polys: Point[][] }[] = [];
+  for (const z of findAll(root, "zone")) {
+    const netNode = find(z, "net_name");
+    const net = netNode?.items[1]?.kind === "atom" ? netNode.items[1].value : "";
+    const layNode = find(z, "layers") ?? find(z, "layer");
+    const layer = layNode?.items[1]?.kind === "atom" ? layNode.items[1].value : "";
+    const polys: Point[][] = [];
+    for (const fp of findAll(z, "filled_polygon")) {
+      const pts = find(fp, "pts");
+      if (!pts) continue;
+      const ring: Point[] = [];
+      for (const xy of findAll(pts, "xy")) {
+        const x = xy.items[1]?.kind === "atom" ? Number(xy.items[1].value) : NaN;
+        const y = xy.items[2]?.kind === "atom" ? Number(xy.items[2].value) : NaN;
+        if (!isNaN(x) && !isNaN(y)) ring.push({ x, y });
+      }
+      if (ring.length > 2) polys.push(ring);
+    }
+    if (polys.length) out.push({ net, layer, polys });
+  }
+  return out;
+}

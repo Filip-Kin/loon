@@ -15,15 +15,38 @@ interface Props {
   rev?: number;
 }
 
-const LAYER_COLOR: Record<string, string> = {
-  "F.Cu": "#c83232",
-  "B.Cu": "#3f7fd6",
-  "F.SilkS": "#e8e8e8",
-  "B.SilkS": "#9a9a9a",
-  "Edge.Cuts": "#e6c84a",
-  "F.CrtYd": "#7a5cff",
-  "F.Fab": "#5d5d5d",
-};
+// #region layers
+// The stack, in the order a fab talks about it. Every drawn thing belongs to one
+// of these, and each can be turned off on its own - the point of a layout view
+// is being able to look at one layer at a time.
+interface LayerDef {
+  id: string;
+  label: string;
+  color: string;
+}
+
+const LAYERS: LayerDef[] = [
+  { id: "F.Cu", label: "F.Cu (front copper)", color: "#c83232" },
+  { id: "B.Cu", label: "B.Cu (back copper)", color: "#3f7fd6" },
+  { id: "F.SilkS", label: "F.Silkscreen", color: "#e8e8e8" },
+  { id: "B.SilkS", label: "B.Silkscreen", color: "#9a9a9a" },
+  { id: "F.Mask", label: "F.Mask openings", color: "#a05ad0" },
+  { id: "B.Mask", label: "B.Mask openings", color: "#6a3a90" },
+  { id: "F.Paste", label: "F.Paste", color: "#9aa0a6" },
+  { id: "F.CrtYd", label: "F.Courtyard", color: "#7a5cff" },
+  { id: "F.Fab", label: "F.Fab", color: "#5d5d5d" },
+  { id: "Edge.Cuts", label: "Edge.Cuts", color: "#e6c84a" },
+  { id: "Drill", label: "Drill holes", color: "#f0f0f0" },
+  { id: "Refs", label: "Reference names", color: "#b9b9b9" },
+  { id: "Ratsnest", label: "Ratsnest", color: "#7fd6a0" },
+];
+
+const LAYER_COLOR: Record<string, string> = Object.fromEntries(LAYERS.map((l) => [l.id, l.color]));
+
+// What is on by default: the two copper layers, the front silkscreen, the
+// outline and the holes. Mask, paste, courtyard and fab are there when you want
+// them and in the way when you do not.
+const DEFAULT_ON = ["F.Cu", "B.Cu", "F.SilkS", "Edge.Cuts", "Drill", "Refs", "Ratsnest"];
 
 function rot(p: Point, deg: number): Point {
   const r = (deg * Math.PI) / 180;
@@ -46,7 +69,10 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   const [layer, setLayer] = useState("F.Cu");
   const [trackStart, setTrackStart] = useState<{ at: Point; net: string } | null>(null);
   const [cursor, setCursor] = useState<Point>({ x: 0, y: 0 });
-  const [showRats, setShowRats] = useState(true);
+  const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(LAYERS.map((l) => [l.id, DEFAULT_ON.includes(l.id)])));
+  const [flip, setFlip] = useState(false);
+  const vis = (id: string) => on[id] === true;
+  const solo = (id: string) => setOn(Object.fromEntries(LAYERS.map((l) => [l.id, l.id === id || l.id === "Edge.Cuts"])));
   const svgRef = useRef<SVGSVGElement>(null);
   const panning = useRef<{ mx: number; my: number; vx: number; vy: number } | null>(null);
 
@@ -212,6 +238,8 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
 
   const errors = drc.filter((d) => d.severity === "error").length;
 
+  const boardW = board.outline.length ? Math.max(...board.outline.map((p) => p.x)) : 0;
+
   return (
     <div className="pcbwrap">
       <div className="pcbbar">
@@ -223,7 +251,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
           <option value="F.Cu">F.Cu (top)</option>
           <option value="B.Cu">B.Cu (bottom)</option>
         </select>
-        <button onClick={() => setShowRats((s) => !s)}>{showRats ? "Hide" : "Show"} ratsnest</button>
+        <button className={flip ? "on" : ""} onClick={() => setFlip((f) => !f)}>{flip ? "Viewing from back" : "Viewing from front"}</button>
         <button onClick={() => generate(true)} disabled={!!busy}>Re-sync from schematic</button>
         <button className="primary" onClick={save} disabled={!!busy}>Save board</button>
         <a className="linkbtn" href={`/artifact/${encodeURIComponent(project)}/${unit ? `boards/${unit}/` : ""}board.kicad_pcb`} download>
@@ -238,9 +266,9 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       </div>
 
       <svg ref={svgRef} className="pcbcanvas" onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
-        <g transform={`translate(${view.x},${view.y}) scale(${view.scale})`}>
+        <g transform={`translate(${view.x},${view.y}) scale(${view.scale}) ${flip ? `translate(${boardW},0) scale(-1,1)` : ""}`}>
           {/* board outline */}
-          {board.outline.length > 2 && (
+          {board.outline.length > 2 && vis("Edge.Cuts") && (
             <polygon
               points={board.outline.map((p) => `${p.x},${p.y}`).join(" ")}
               fill="rgba(40,60,40,0.35)"
@@ -250,19 +278,60 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
             />
           )}
 
+          {/* copper pours, as KiCad filled them */}
+          {(board.zones ?? []).map((z, zi) =>
+            vis(z.layer)
+              ? (z.filled?.length ? z.filled : [z.polygon]).map((ring, ri) => (
+                  <polygon
+                    key={`${zi}-${ri}`}
+                    points={ring.map((p) => `${p.x},${p.y}`).join(" ")}
+                    fill={LAYER_COLOR[z.layer] ?? "#888"}
+                    fillOpacity={z.filled?.length ? 0.28 : 0.08}
+                    stroke={LAYER_COLOR[z.layer] ?? "#888"}
+                    strokeWidth={0.1}
+                    strokeDasharray={z.filled?.length ? undefined : "0.6 0.4"}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))
+              : null,
+          )}
+
           {/* ratsnest */}
-          {showRats &&
+          {vis("Ratsnest") &&
             rats.map((r, i) => (
               <line key={i} x1={r.a.x} y1={r.a.y} x2={r.b.x} y2={r.b.y} stroke="#7fd6a0" strokeWidth={0.06} opacity={0.6} vectorEffect="non-scaling-stroke" />
             ))}
 
           {/* tracks */}
-          {board.tracks.map((t) => (
+          {board.tracks.filter((t) => vis(t.layer)).map((t) => (
             <line key={t.uuid} x1={t.start.x} y1={t.start.y} x2={t.end.x} y2={t.end.y} stroke={LAYER_COLOR[t.layer] ?? "#888"} strokeWidth={t.width} strokeLinecap="round" opacity={0.9} />
           ))}
+          {/* vias */}
+          {(board.vias ?? []).map((v) => (
+            <g key={v.uuid}>
+              {vis("F.Cu") && <circle cx={v.at.x} cy={v.at.y} r={v.size / 2} fill={LAYER_COLOR["F.Cu"]} opacity={0.8} />}
+              {vis("Drill") && <circle cx={v.at.x} cy={v.at.y} r={v.drill / 2} fill="#101216" />}
+            </g>
+          ))}
+
           {trackStart && (
             <line x1={trackStart.at.x} y1={trackStart.at.y} x2={cursor.x} y2={cursor.y} stroke={LAYER_COLOR[layer]} strokeWidth={0.2} strokeDasharray="0.5 0.4" />
           )}
+
+          {/* board silkscreen */}
+          {(board.texts ?? []).filter((t) => vis(t.layer)).map((t, i) => (
+            <text
+              key={i}
+              x={t.at.x}
+              y={t.at.y}
+              fontSize={t.size}
+              fill={LAYER_COLOR[t.layer] ?? "#d8d8d8"}
+              transform={t.rotation ? `rotate(${t.rotation},${t.at.x},${t.at.y})` : undefined}
+              style={{ fontWeight: t.bold ? 700 : 400 }}
+            >
+              {t.text}
+            </text>
+          ))}
 
           {/* footprints */}
           {board.footprints.map((f) => {
@@ -272,9 +341,9 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
             return (
               <g key={f.uuid} transform={`translate(${f.at.x},${f.at.y}) rotate(${f.rotation}) ${f.side === "B" ? "scale(-1,1)" : ""}`}>
                 {fp.graphics
-                  .filter((g) => g.layer.endsWith("SilkS") || g.layer.endsWith("Fab"))
+                  .filter((g) => vis(f.side === "B" ? g.layer.replace(/^F\./, "B.") : g.layer))
                   .map((g, i) => {
-                    const color = g.layer.endsWith("SilkS") ? "#d8d8d8" : "#4a4a4a";
+                    const color = LAYER_COLOR[f.side === "B" ? g.layer.replace(/^F\./, "B.") : g.layer] ?? "#4a4a4a";
                     if (g.type === "line") return <line key={i} x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y} stroke={color} strokeWidth={g.width} opacity={0.8} />;
                     if (g.type === "rect")
                       return (
@@ -286,30 +355,40 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
                   })}
                 {fp.pads.map((pad, i) => {
                   const p = rot(pad.at, 0);
-                  const isThru = pad.type !== "smd";
-                  const color = isThru ? "#c8a032" : f.side === "F" ? LAYER_COLOR["F.Cu"] : LAYER_COLOR["B.Cu"];
+                  const thru = pad.type !== "smd";
+                  // A through hole pad is copper on both sides; a surface mount
+                  // pad only exists on the side the part is fitted to.
+                  const padLayers = thru ? ["F.Cu", "B.Cu"] : [f.side === "F" ? "F.Cu" : "B.Cu"];
+                  const shown = padLayers.filter((l) => vis(l));
+                  const maskLayer = f.side === "F" ? "F.Mask" : "B.Mask";
+                  const shape = (color: string, grow: number, opacity: number, key: string) =>
+                    pad.shape === "circle" ? (
+                      <circle key={key} r={pad.size.w / 2 + grow} fill={color} opacity={opacity} />
+                    ) : (
+                      <rect
+                        key={key}
+                        x={-pad.size.w / 2 - grow}
+                        y={-pad.size.h / 2 - grow}
+                        width={pad.size.w + grow * 2}
+                        height={pad.size.h + grow * 2}
+                        rx={pad.shape === "roundrect" || pad.shape === "oval" ? Math.min(pad.size.w, pad.size.h) * (pad.shape === "oval" ? 0.5 : 0.25) : 0}
+                        fill={color}
+                        opacity={opacity}
+                      />
+                    );
                   return (
                     <g key={i} transform={`translate(${p.x},${p.y}) rotate(${pad.rotation})`}>
-                      {pad.shape === "circle" ? (
-                        <circle r={pad.size.w / 2} fill={color} opacity={0.92} />
-                      ) : (
-                        <rect
-                          x={-pad.size.w / 2}
-                          y={-pad.size.h / 2}
-                          width={pad.size.w}
-                          height={pad.size.h}
-                          rx={pad.shape === "roundrect" || pad.shape === "oval" ? Math.min(pad.size.w, pad.size.h) * (pad.shape === "oval" ? 0.5 : 0.25) : 0}
-                          fill={color}
-                          opacity={0.92}
-                        />
-                      )}
-                      {pad.drill ? <circle r={pad.drill / 2} fill="#101216" /> : null}
+                      {vis(maskLayer) && shape(LAYER_COLOR[maskLayer], 0.05, 0.35, "mask")}
+                      {shown.map((l) => shape(thru ? "#c8a032" : LAYER_COLOR[l], 0, 0.92, l))}
+                      {pad.drill && vis("Drill") ? <circle r={pad.drill / 2} fill="#101216" stroke="#f0f0f0" strokeWidth={0.05} /> : null}
                     </g>
                   );
                 })}
-                <text x={0} y={-((fp.bbox.max.y - fp.bbox.min.y) / 2 + 0.4)} fontSize={0.9} fill={selected ? "#fff" : "#b9b9b9"} textAnchor="middle">
-                  {f.ref}
-                </text>
+                {vis("Refs") && (
+                  <text x={0} y={-((fp.bbox.max.y - fp.bbox.min.y) / 2 + 0.4)} fontSize={0.9} fill={selected ? "#fff" : LAYER_COLOR["Refs"]} textAnchor="middle">
+                    {f.ref}
+                  </text>
+                )}
                 {selected && (
                   <rect
                     x={fp.bbox.min.x - 0.2}
@@ -327,6 +406,26 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
           })}
         </g>
       </svg>
+
+      <div className="layerpanel">
+        <div className="layerhead">Layers</div>
+        {LAYERS.map((l) => (
+          <div key={l.id} className={"layerrow" + (vis(l.id) ? " on" : "")}>
+            <label>
+              <input type="checkbox" checked={vis(l.id)} onChange={(e) => setOn((o) => ({ ...o, [l.id]: e.target.checked }))} />
+              <span className="swatch" style={{ background: l.color }} />
+              {l.label}
+            </label>
+            <button className="soloBtn" title="Show only this layer" onClick={() => solo(l.id)}>
+              only
+            </button>
+          </div>
+        ))}
+        <div className="layerrow">
+          <button onClick={() => setOn(Object.fromEntries(LAYERS.map((l) => [l.id, true])))}>All</button>
+          <button onClick={() => setOn(Object.fromEntries(LAYERS.map((l) => [l.id, DEFAULT_ON.includes(l.id)])))}>Reset</button>
+        </div>
+      </div>
 
       {drc.length > 0 && (
         <div className="drclist">

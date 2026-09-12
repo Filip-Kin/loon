@@ -15,7 +15,7 @@ import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
-import { serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
+import { readZoneFills, serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
 import { fillZones, runKicadDrc } from "../services/kicad";
 import { startSpice, startQemu, getSim } from "../services/sim";
 import { buildSpiceDeck, parseWrdata, type SpiceBench } from "@loon/shared/spice";
@@ -642,6 +642,19 @@ const pcbRouter = router({
       if (res.board.zones.length) {
         const fill = await fillZones(input.project, unit);
         notes.push(fill.ok ? fill.note : `zone fill failed: ${fill.note}`);
+        // Read the copper KiCad just computed back into loon's own board, so
+        // the layout view shows the pour as it will be made rather than an
+        // empty outline.
+        try {
+          const fills = readZoneFills(await storage.readFile(input.project, "board.kicad_pcb", unit));
+          for (const z of res.board.zones) {
+            const hit = fills.find((f) => f.net === z.net && f.layer === z.layer);
+            if (hit) z.filled = hit.polys;
+          }
+          await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
+        } catch {
+          /* the fill is in the kicad file either way */
+        }
       }
       return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes };
     }),
