@@ -35,9 +35,13 @@ export type Op =
   // Join two nets by name: every label reading `from` becomes `to`. This is how
   // connecting two block ports is expressed.
   | { op: "rename_net"; from: string; to: string }
-  // Remove every wire on a net, leaving its pins joined by name. The repair for
-  // a net that swallowed the board: the wires go, the connection stays.
+  // Remove every wire on a net. keepLabels re-joins its pins by name, which is
+  // only right when the net is real - never when it is a short.
   | { op: "delete_net_wires"; net: string; keepLabels?: boolean }
+  // Erase a net completely: its wires and its labels, leaving the pins bare.
+  // This is the repair for a net that swallowed the board, where "keeping the
+  // connection" would keep the fault.
+  | { op: "clear_net"; net: string }
   // Re-expand a block with new parameters. Its old parts are removed first, so
   // hand edits inside the block are lost - the UI must confirm.
   | { op: "set_block_params"; blockId: string; params: Record<string, string | number> };

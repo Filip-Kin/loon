@@ -338,8 +338,9 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
           .map(([uuid]) => uuid),
       );
       if (doomed.size === 0) return { ok: false, error: `Net ${op.net} has no wires` };
-      // Keep the connection: every pin on the net gets the name it was on.
-      if (op.keepLabels !== false) {
+      // Only re-join by name when asked. Doing it by default turns a short made
+      // of wires into a short made of labels, which is worse: it looks tidy.
+      if (op.keepLabels === true) {
         for (const p of net.pins) {
           if (schem.labels.some((l) => l.text === op.net && Math.abs(l.at.x - p.at.x) < 0.05 && Math.abs(l.at.y - p.at.y) < 0.05)) continue;
           schem.labels.push({ uuid: newUuid(), kind: "local", text: op.net, at: p.at, rotation: 0 });
@@ -347,6 +348,27 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       }
       schem.wires = schem.wires.filter((w) => !doomed.has(w.uuid));
       return { ok: true };
+    }
+
+    case "clear_net": {
+      const nl = buildNetlist(schem, (libId) => resolve(libId)?.def);
+      const net = nl.nets.find((n) => n.name === op.net);
+      if (!net) return { ok: false, error: `No net named ${op.net}` };
+      const wires = new Set(
+        Object.entries(nl.netOfWire)
+          .filter(([, name]) => name === op.net)
+          .map(([uuid]) => uuid),
+      );
+      const labels = new Set(
+        Object.entries(nl.netOfLabel)
+          .filter(([, name]) => name === op.net)
+          .map(([uuid]) => uuid),
+      );
+      const before = schem.wires.length + schem.labels.length;
+      schem.wires = schem.wires.filter((w) => !wires.has(w.uuid));
+      schem.labels = schem.labels.filter((l) => !labels.has(l.uuid) && l.text !== op.net);
+      const removed = before - (schem.wires.length + schem.labels.length);
+      return removed > 0 ? { ok: true } : { ok: false, error: `Nothing to clear on ${op.net}` };
     }
 
     case "set_block_params": {

@@ -157,7 +157,8 @@ BLOCK-LEVEL OPS (the block view is the same document, grouped by module):
 - {"op":"delete_block","blockId":"..."}
 - {"op":"set_block_params","blockId":"...","params":{"inputs":4}}   (rebuilds the block from its module; hand edits inside it are lost)
 - {"op":"rename_net","from":"ARM","to":"IO21_ARM"}   (joins two nets by name; this is how block ports connect)
-- {"op":"delete_net_wires","net":"+24V"}   (deletes every wire on a net and labels its pins with the net name instead. This is the repair when a net has swallowed the board: a wire that crosses a pin connects to it, so one long route can short dozens of parts together. The connection survives; the wire that caused the short does not.)
+- {"op":"delete_net_wires","net":"SOME_NET","keepLabels":true}   (deletes the wires on a net; keepLabels re-joins its pins by name. Use this only on a net that is genuinely one node.)
+- {"op":"clear_net","net":"+24V"}   (erases a net entirely: its wires AND its labels, leaving those pins bare. This is the repair for a net that swallowed the board. Do NOT keep the connection when the connection is the fault - clear it, then label only the pins that truly belong on that net.)
 
 WIRING RULE: connect_pins only draws a wire when the route is clear of every other pin; otherwise it joins the two pins by name automatically. Do not try to hand-route long distances with add_wire - across a busy sheet that is how a net swallows the board. For anything further than a few parts, use a label.`;
 
