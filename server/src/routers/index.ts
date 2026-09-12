@@ -11,6 +11,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
+import { autoroute } from "@loon/shared/autoroute";
 import { serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
 import { runKicadDrc } from "../services/kicad";
 import { startSpice, startQemu, getSim } from "../services/sim";
@@ -145,12 +146,21 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
         }
       }
       const res = generateBoard(schem, defs, { rules: OSHPARK_2LAYER, footprints, existing });
+      // Route the signals. Power nets are left for copper, deliberately.
+      let routeNote = "";
+      if (a.route !== false) {
+        const nlb = buildNetlist(schem, defs);
+        const r = autoroute(res.board, footprints, nlb);
+        res.board.tracks.push(...r.tracks);
+        res.board.vias.push(...r.vias);
+        routeNote = `routed ${r.routed} connections, ${r.failed} unroutable, ${new Set(r.skipped).size} power nets left for copper`;
+      }
       await storage.writeFile(project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
       await storage.writeFile(project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)), unit);
       await storage.writeFile(project, "board.kicad_pro", serializeProject(res.board, "board"), unit);
       job.touched!.board = true;
       const rats = ratsnest(res.board, footprints);
-      const notes = [`placed ${res.placed} parts`, ...res.notes, `${rats.length} connections to route`];
+      const notes = [`placed ${res.placed} parts`, ...res.notes, ...(routeNote ? [routeNote] : []), `${rats.length} connections in the netlist`];
       if (res.missingFootprints.length) notes.push(`${res.missingFootprints.length} parts have no footprint set`);
       if (res.approximate.length) notes.push(`${res.approximate.length} generated land patterns to check`);
       return notes.join(", ");
@@ -588,7 +598,7 @@ const pcbRouter = router({
     }),
 
   generate: publicProcedure
-    .input(z.object({ project: z.string(), schem: z.any(), layers: z.number().optional(), keepPlacement: z.boolean().optional(), board: z.string().optional() }))
+    .input(z.object({ project: z.string(), schem: z.any(), layers: z.number().optional(), keepPlacement: z.boolean().optional(), board: z.string().optional(), route: z.boolean().optional() }))
     .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
       const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
@@ -613,10 +623,22 @@ const pcbRouter = router({
         footprints,
         existing,
       });
+      // Route the signals unless asked not to. A 30A channel is not a trace,
+      // so power nets are left for copper and the note says how many.
+      const notes = [...res.notes];
+      if (input.route !== false) {
+        const nlb = buildNetlist(schem, defs);
+        const r = autoroute(res.board, footprints, nlb);
+        res.board.tracks.push(...r.tracks);
+        res.board.vias.push(...r.vias);
+        notes.push(
+          `routed ${r.routed} connections with ${r.tracks.length} tracks and ${r.vias.length} vias in ${r.seconds.toFixed(0)}s; ${r.failed} could not be routed and ${new Set(r.skipped).size} power nets were left for copper`,
+        );
+      }
       await storage.writeFile(input.project, "board.loon.json", JSON.stringify(res.board, null, 2), unit);
       await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(res.board, rawOf(footprints)), unit);
       await storage.writeFile(input.project, "board.kicad_pro", serializeProject(res.board, "board"), unit);
-      return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes: res.notes };
+      return { board: res.board, placed: res.placed, missingFootprints: res.missingFootprints, approximate: res.approximate, notes };
     }),
 
   load: publicProcedure

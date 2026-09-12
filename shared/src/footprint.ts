@@ -37,6 +37,9 @@ export interface Footprint {
   // The courtyard is the keep-clear area KiCad's DRC checks between parts. It
   // is bigger than the pads, so placement has to use it.
   courtyard?: { min: Point; max: Point };
+  // Keepout zones the part declares - an RF module's antenna clearance, for
+  // one. Copper is not allowed inside them.
+  keepouts?: Point[][];
   // True when the land pattern came from KiCad's library rather than being
   // generated from a package name. Generated ones must be checked before fab.
   fromLibrary: boolean;
@@ -130,11 +133,25 @@ export function parseFootprint(text: string, libId: string): Footprint {
     else { cacc(g.start); cacc(g.mid); cacc(g.end); }
   }
 
+  // Keepout zones: a zone node carrying a (keepout ...) child.
+  const keepouts: Point[][] = [];
+  for (const z of findAll(root, "zone")) {
+    if (!find(z, "keepout")) continue;
+    for (const poly of findAll(z, "polygon")) {
+      const ptsNode = find(poly, "pts");
+      if (!ptsNode) continue;
+      const ring: Point[] = [];
+      for (const xy of findAll(ptsNode, "xy")) ring.push({ x: numAt(xy, 1), y: numAt(xy, 2) });
+      if (ring.length > 2) keepouts.push(ring);
+    }
+  }
+
   return {
     libId,
     name,
     pads,
     graphics,
+    keepouts: keepouts.length ? keepouts : undefined,
     bbox: { min: { x: minx, y: miny }, max: { x: maxx, y: maxy } },
     courtyard: isFinite(cminx) ? { min: { x: cminx, y: cminy }, max: { x: cmaxx, y: cmaxy } } : undefined,
     fromLibrary: true,
