@@ -1,5 +1,8 @@
 # Roadmap and design direction
 
+> The concrete build plan for the block view, PCB view, code view and
+> simulation lives in [PLAN-views.md](PLAN-views.md).
+
 This is the shape loon is growing into, and the order of work. It is written to
 match the vision, not the current code. Where the code already meets it, that is
 noted.
