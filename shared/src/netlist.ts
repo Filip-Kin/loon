@@ -37,6 +37,10 @@ export interface Netlist {
   nets: Net[];
   // "REF:PIN" -> net name.
   netOfPin: Record<string, string>;
+  // Wire uuid -> net name, so a live view can colour copper by its state.
+  netOfWire: Record<string, string>;
+  // Label uuid -> net name.
+  netOfLabel: Record<string, string>;
 }
 
 export type DefResolver = (libId: string) => LibSymbol | undefined;
@@ -186,7 +190,23 @@ export function buildNetlist(schem: Schematic, resolve?: DefResolver): Netlist {
   const netOfPin: Record<string, string> = {};
   for (const net of nets) for (const p of net.pins) netOfPin[`${p.ref}:${p.pin}`] = net.name;
 
-  return { nets, netOfPin };
+  // Geometry -> net, for anything that wants to draw the design in its live
+  // state rather than as a static drawing.
+  const nameByRoot = new Map<string, string>();
+  for (const net of nets) nameByRoot.set(net.id, net.name);
+  const netOfWire: Record<string, string> = {};
+  for (const w of schem.wires) {
+    if (!w.pts.length) continue;
+    const name = nameByRoot.get(ds.find(key(w.pts[0])));
+    if (name) netOfWire[w.uuid] = name;
+  }
+  const netOfLabel: Record<string, string> = {};
+  for (const l of schem.labels) {
+    const name = nameByRoot.get(ds.find(key(l.at)));
+    if (name) netOfLabel[l.uuid] = name;
+  }
+
+  return { nets, netOfPin, netOfWire, netOfLabel };
 }
 
 export function formatNetlist(nl: Netlist, limit = 60): string {

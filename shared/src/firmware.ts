@@ -106,15 +106,18 @@ export function generatePlatformIni(target: FirmwareTarget): string {
     "    -DARDUINO_USB_CDC_ON_BOOT=1",
     "    -DARDUINO_USB_MODE=1",
     "",
-    "; The emulator has no USB peripheral, so the simulation build prints to",
-    "; UART0 instead. Same code, different console.",
+    "; Build used by the simulator only. It targets the classic ESP32 because",
+    "; the prebuilt Arduino libraries for the S3 put their console on",
+    "; USB-Serial-JTAG, which the emulator does not model - an S3 sketch asserts",
+    "; during startup before it reaches loop(). Same source, same GPIO numbers",
+    "; from board_pins.h; only the console differs. Pins above GPIO39 do not",
+    "; exist on the classic part, so treat this build as a behaviour bench, not",
+    "; a substitute for the real board.",
     "[env:sim]",
     "platform = espressif32",
-    `board = ${isS3 ? "esp32-s3-devkitc-1" : "esp32dev"}`,
+    "board = esp32dev",
     "framework = arduino",
     "monitor_speed = 115200",
-    "build_flags =",
-    "    -DARDUINO_USB_CDC_ON_BOOT=0",
     "",
   ].join("\n");
 }
@@ -138,7 +141,10 @@ ${target.pins
 
 void loop() {
 ${first ? `  // ${first.net} is on GPIO${first.gpio}` : "  // no pins wired yet"}
-  delay(1000);
+  // The board's watchdog is fed by this line: the simulator treats a KICK as
+  // proof the firmware is alive, exactly as the hardware treats the kick pin.
+  Serial.println("KICK");
+  delay(250);
 }
 `;
 }

@@ -278,6 +278,8 @@ ${files || "(none yet)"}
 USER REQUEST:
 ${userMessage}
 
+Keep printing a line containing the word KICK on every pass of the main loop, at least four times a second, alongside whatever else you print: the simulator feeds the board's watchdog from that line, so firmware that stops looping correctly trips the e-stop latch in the simulation the same way it would in hardware.
+
 Write firmware that matches what the hardware actually does. If the board has a hardware e-stop latch with a watchdog charge pump, the firmware must keep toggling the kick pin to stay armed and must stop toggling to trip it - do not invent a different mechanism. Remember: output only the JSON object.`;
 }
 

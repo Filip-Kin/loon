@@ -119,6 +119,18 @@ svg.canvas.panning { cursor: grabbing; }
 .simwrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .simbar { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .simbody { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.simbar .sep { width: 1px; height: 20px; background: var(--line-2); }
+.simbar .spacer { flex: 1; }
+.simsplit { flex: 1; display: flex; min-height: 0; }
+.liveschem { flex: 1; position: relative; min-width: 0; }
+.livecanvas { width: 100%; height: 100%; display: block; background: #0e1013; cursor: grab; }
+.livehover { position: absolute; left: 10px; bottom: 10px; background: rgba(20,21,26,0.92); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 10px; font-size: 12px; }
+.simdock { width: 430px; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.dockpane { flex: 1; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+.dockpane .simhead { display: flex; align-items: center; gap: 8px; }
+.dockpane .buildlog { flex: 1; height: auto; min-height: 0; }
+.scopebody { flex: 1; overflow: auto; min-height: 0; }
+.scopebody .plot { height: 170px; }
 .simbody.column { flex-direction: column; gap: 8px; padding: 10px; overflow: auto; }
 .simcontrols { width: 300px; border-right: 1px solid var(--line); overflow: auto; padding-bottom: 10px; }
 .simnets { flex: 1; overflow: auto; min-width: 0; }

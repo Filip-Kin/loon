@@ -103,13 +103,15 @@ export function startQemu(project: string, seconds = 12): SimJob {
       const merge = Bun.spawn(
         [
           DOCKER, "run", "--rm", "-v", `${dir}:/work`, "-w", "/work/firmware", PIO_IMAGE,
-          "python", "-m", "esptool", "--chip", "esp32s3", "merge-bin", "-o", "/work/sim/flash.bin",
+          // The simulation build targets the classic ESP32 (see the generated
+          // platformio.ini for why), whose bootloader lives at 0x1000.
+          "python", "-m", "esptool", "--chip", "esp32", "merge-bin", "-o", "/work/sim/flash.bin",
           // QEMU only accepts 2, 4, 8 or 16MB images, and merge-bin does not pad
           // to the flash size on its own.
-          // 8MB to match the bootloader header PlatformIO writes for this
-          // board; a size mismatch leaves the second stage hanging.
-          "--flash-mode", "dio", "--flash-freq", "80m", "--flash-size", "8MB", "--pad-to-size", "8MB",
-          "0x0", ".pio/build/sim/bootloader.bin",
+          // QEMU only accepts 2, 4, 8 or 16MB images, and the size must match
+          // the bootloader header or the second stage hangs.
+          "--flash-mode", "dio", "--flash-freq", "40m", "--flash-size", "4MB", "--pad-to-size", "4MB",
+          "0x1000", ".pio/build/sim/bootloader.bin",
           "0x8000", ".pio/build/sim/partitions.bin",
           "0x10000", ".pio/build/sim/firmware.bin",
         ],
@@ -126,9 +128,8 @@ export function startQemu(project: string, seconds = 12): SimJob {
         [
           DOCKER, "run", "--rm", "-v", `${dir}/sim:/work`, "-w", "/work", QEMU_IMAGE,
           "timeout", String(seconds),
-          "qemu-system-xtensa", "-nographic", "-machine", "esp32s3",
+          "qemu-system-xtensa", "-nographic", "-machine", "esp32",
           "-drive", "file=flash.bin,if=mtd,format=raw",
-          "-global", "driver=timer.esp32s3.timg,property=wdt_disable,value=true",
         ],
         { stdout: "pipe", stderr: "pipe" },
       );
