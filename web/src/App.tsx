@@ -27,11 +27,21 @@ export function App() {
   const [aiAvailable, setAiAvailable] = useState(true);
   const [rightTab, setRightTab] = useState<"props" | "ai" | "debug">("ai");
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
+  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
   const [mobileView, setMobileView] = useState<"design" | "parts" | "panel">("design");
 
   const past = useRef<Schematic[]>([]);
   const future = useRef<Schematic[]>([]);
+  // Autosave bookkeeping. skipAutosave suppresses the save that would
+  // otherwise fire the moment a project is opened, which would rewrite the
+  // file with what we just read.
+  const skipAutosave = useRef(true);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saving = useRef(false);
+  const pendingSave = useRef(false);
+  const latest = useRef<{ name: string; schem: Schematic | null }>({ name: "untitled", schem: null });
 
   const resolver = useMemo(() => makeClientResolver(defs, parts), [defs, parts]);
   const renderDefs = useMemo(() => ({ ...defs, ...(schem?.libSymbols ?? {}) }), [defs, schem]);
@@ -50,8 +60,10 @@ export function App() {
       setDefs(lib.defs);
       const list = await trpc.project.list.query();
       setProjects(list);
-      if (list.length > 0) {
-        await openProject(list[0].name);
+      const last = localStorage.getItem("loon.lastProject");
+      const pick = list.find((p) => p.name === last)?.name ?? list[0]?.name;
+      if (pick) {
+        await openProject(pick);
       } else {
         await newProject("untitled");
       }
@@ -94,6 +106,9 @@ export function App() {
   async function newProject(name: string) {
     const res = await trpc.project.create.mutate({ name });
     past.current = []; future.current = [];
+    skipAutosave.current = true;
+    setSaveState("saved");
+    localStorage.setItem("loon.lastProject", name);
     setSchem(res.schem);
     setProjectName(name);
     setSelection(null);
@@ -103,6 +118,9 @@ export function App() {
   async function openProject(name: string) {
     const res = await trpc.project.load.query({ name });
     past.current = []; future.current = [];
+    skipAutosave.current = true;
+    setSaveState("saved");
+    localStorage.setItem("loon.lastProject", name);
     setSchem(res.schem);
     setProjectName(name);
     setSelection(null);
@@ -110,11 +128,16 @@ export function App() {
 
   async function save() {
     if (!schem) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
     try {
+      setSaveState("saving");
       await trpc.project.save.mutate({ name: projectName, schem });
+      setSavedAt(Date.now());
+      setSaveState("saved");
       setProjects(await trpc.project.list.query());
       flash(`Saved ${projectName}.kicad_sch`);
     } catch (e: any) {
+      setSaveState("error");
       flash(String(e?.message ?? e), true);
     }
   }
@@ -136,6 +159,58 @@ export function App() {
     }
     setBusy(false);
   }
+
+  // #region autosave
+  // Every mutation funnels through commit(), so watching `schem` catches edits,
+  // AI ops and undo/redo alike. Debounced, because dragging a symbol produces a
+  // new schematic on every mouse move.
+  useEffect(() => {
+    latest.current = { name: projectName, schem };
+    if (!schem) return;
+    if (skipAutosave.current) { skipAutosave.current = false; return; }
+    setSaveState("dirty");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { autosave(); }, 900);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [schem, projectName]);
+
+  async function autosave() {
+    const { name, schem: cur } = latest.current;
+    if (!cur) return;
+    if (saving.current) { pendingSave.current = true; return; }
+    saving.current = true;
+    setSaveState("saving");
+    try {
+      await trpc.project.save.mutate({ name, schem: cur });
+      setSavedAt(Date.now());
+      setSaveState(pendingSave.current ? "dirty" : "saved");
+    } catch (e: any) {
+      setSaveState("error");
+      flash(`Autosave failed: ${String(e?.message ?? e)}`, true);
+    }
+    saving.current = false;
+    if (pendingSave.current) { pendingSave.current = false; autosave(); }
+  }
+
+  // A refresh or a closed tab must not lose the last few seconds of work, so
+  // flush the pending save with a keepalive request the browser will finish
+  // even as the page goes away.
+  useEffect(() => {
+    function flush() {
+      if (saveState === "saved" || !latest.current.schem) return;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      // Batch-link wire format: ?batch=1 with the inputs keyed by index.
+      const body = JSON.stringify({ 0: { name: latest.current.name, schem: latest.current.schem } });
+      fetch("/trpc/project.save?batch=1", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => {});
+    }
+    function onHide() { if (document.visibilityState === "hidden") flush(); }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, [saveState]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -184,6 +259,9 @@ export function App() {
         </select>
         <button onClick={() => { const n = prompt("New project name", "untitled"); if (n) newProject(n); }}>New</button>
         <button onClick={save}>Save</button>
+        <span className={"savestate " + saveState} title={savedAt ? `Last saved ${new Date(savedAt).toLocaleTimeString()}` : "Not saved yet"}>
+          {saveState === "saving" ? "Saving..." : saveState === "dirty" ? "Unsaved" : saveState === "error" ? "Save failed" : savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Saved"}
+        </span>
         <div className="desktop-only" style={{ width: 1, height: 22, background: "var(--line)" }} />
         <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>
         <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>
