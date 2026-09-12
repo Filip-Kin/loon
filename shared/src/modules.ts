@@ -572,6 +572,230 @@ const modules: ModuleDef[] = [
       };
     },
   },
+  // #region e-stop latch
+  {
+    id: "estop_latch",
+    name: "E-stop latch (hardware, with the software path wired in)",
+    description:
+      "A latch that holds the board stopped until a person arms it again. Any panel e-stop drives a diode OR straight into the flip-flop's asynchronous CLR - no firmware involved. The MCU joins the same OR through a charge-pump watchdog: it has to keep toggling WDT_KICK to stay armed, so a lost RF heartbeat, a pressed remote e-stop, a firmware hang or a dead MCU all stop the board through the same hardware path. Arming needs a rising edge on ARM from the MCU, so nothing re-enables itself, and an RC on CLR holds the board stopped through power-up.",
+    params: [
+      { name: "run_net", type: "string", default: "ESTOP_RUN", doc: "Enable net for the switched channels (high = allowed to run)" },
+      { name: "inputs", type: "number", default: 2, doc: "Number of panel e-stop inputs joining the OR" },
+      { name: "decay_ms", type: "number", default: 20, unit: "ms", doc: "How long after the MCU stops toggling the latch trips" },
+    ],
+    build(params) {
+      const run = String(p(params, "run_net", "ESTOP_RUN"));
+      const nIn = Math.max(1, Math.min(4, Math.round(Number(p(params, "inputs", 2)))));
+      const decayMs = Math.max(5, Number(p(params, "decay_ms", 20)));
+      // Watchdog detector decay is R x C, with C fixed at 470n.
+      const rDet = decayMs / 1000 / 470e-9;
+      const parts: ModulePart[] = [
+        { local: "U", libId: "Logic_Flipflop:SN74LVC1G74", value: "SN74LVC1G74", dx: 0, dy: 0 },
+        { local: "CD", libId: "Device:C", value: "100n", dx: 24, dy: -22 },
+        { local: "RD", libId: "Device:R", value: "10k", dx: -34, dy: -26 },
+        { local: "RPRE", libId: "Device:R", value: "10k", dx: -34, dy: -12 },
+        { local: "RCLR", libId: "Device:R", value: "10k", dx: -50, dy: 6 },
+        { local: "CPOR", libId: "Device:C", value: "1u", dx: -50, dy: 20 },
+        { local: "QINV", libId: "Device:Q_NMOS_GSD", value: "2N7002", dx: -66, dy: 10 },
+        { local: "RTRIP", libId: "Device:R", value: "10k", dx: -80, dy: 22 },
+        { local: "CP", libId: "Device:C", value: "100n", dx: -110, dy: -20 },
+        { local: "DP1", libId: "Device:D", value: "BAT54", dx: -98, dy: -20 },
+        { local: "DP2", libId: "Device:D", value: "BAT54", dx: -110, dy: -6 },
+        { local: "RDET", libId: "Device:R", value: nearestE12(rDet), dx: -88, dy: -6 },
+        { local: "CDET", libId: "Device:C", value: "470n", dx: -80, dy: -6 },
+        { local: "QWD", libId: "Device:Q_NMOS_GSD", value: "2N7002", dx: -96, dy: 10 },
+        { local: "RWD", libId: "Device:R", value: "10k", dx: -96, dy: -2 },
+        { local: "DLED", libId: "Device:LED", value: "green RUN", dx: 36, dy: 10 },
+        { local: "RLED", libId: "Device:R", value: "1k", dx: 36, dy: 22 },
+      ];
+      const nets: ModuleNet[] = [
+        { local: "U", pin: "8", label: "+3V3" },
+        { local: "U", pin: "4", label: "GND" },
+        { local: "U", pin: "2", label: "ARM_D" },
+        { local: "U", pin: "1", label: "ARM" },
+        { local: "U", pin: "6", label: "CLR_N" },
+        { local: "U", pin: "7", label: "PRE_N" },
+        { local: "U", pin: "5", label: run },
+        { local: "U", pin: "3", label: "ESTOP_TRIPPED" },
+        { local: "CD", pin: "1", label: "+3V3" },
+        { local: "CD", pin: "2", label: "GND" },
+        { local: "RD", pin: "1", label: "+3V3" },
+        { local: "RD", pin: "2", label: "ARM_D" },
+        { local: "RPRE", pin: "1", label: "+3V3" },
+        { local: "RPRE", pin: "2", label: "PRE_N" },
+        { local: "RCLR", pin: "1", label: "+3V3" },
+        { local: "RCLR", pin: "2", label: "CLR_N" },
+        { local: "CPOR", pin: "1", label: "CLR_N" },
+        { local: "CPOR", pin: "2", label: "GND" },
+        { local: "QINV", pin: "1", label: "ESTOP_TRIP" },
+        { local: "QINV", pin: "3", label: "CLR_N" },
+        { local: "QINV", pin: "2", label: "GND" },
+        { local: "RTRIP", pin: "1", label: "ESTOP_TRIP" },
+        { local: "RTRIP", pin: "2", label: "GND" },
+        { local: "CP", pin: "1", label: "WDT_KICK" },
+        { local: "CP", pin: "2", label: "WDT_PUMP" },
+        { local: "DP2", pin: "1", label: "WDT_PUMP" },
+        { local: "DP2", pin: "2", label: "GND" },
+        { local: "DP1", pin: "2", label: "WDT_PUMP" },
+        { local: "DP1", pin: "1", label: "WDT_DET" },
+        { local: "RDET", pin: "1", label: "WDT_DET" },
+        { local: "RDET", pin: "2", label: "GND" },
+        { local: "CDET", pin: "1", label: "WDT_DET" },
+        { local: "CDET", pin: "2", label: "GND" },
+        { local: "QWD", pin: "1", label: "WDT_DET" },
+        { local: "QWD", pin: "3", label: "WDT_FAIL" },
+        { local: "QWD", pin: "2", label: "GND" },
+        { local: "RWD", pin: "1", label: "+3V3" },
+        { local: "RWD", pin: "2", label: "WDT_FAIL" },
+        { local: "DLED", pin: "2", label: run },
+        { local: "DLED", pin: "1", label: "RUN_LED" },
+        { local: "RLED", pin: "1", label: "RUN_LED" },
+        { local: "RLED", pin: "2", label: "GND" },
+      ];
+      // Diode OR: every trip source, hardware or software, drives one node.
+      for (let i = 0; i < nIn; i++) {
+        const local = `DIN${i}`;
+        parts.push({ local, libId: "Device:D", value: "BAT54", dx: -96 - i * 12, dy: 34 });
+        nets.push({ local, pin: "2", label: `ESTOP${i + 1}` });
+        nets.push({ local, pin: "1", label: "ESTOP_TRIP" });
+      }
+      parts.push({ local: "DWD", libId: "Device:D", value: "BAT54", dx: -96 - nIn * 12, dy: 34 });
+      nets.push({ local: "DWD", pin: "2", label: "WDT_FAIL" });
+      nets.push({ local: "DWD", pin: "1", label: "ESTOP_TRIP" });
+      return { parts, wires: [], nets };
+    },
+  },
+
+  // #region 4-switch buck-boost
+  {
+    id: "buckboost_20v",
+    name: "Buck-boost rail (a 20V computer supply off a 24V pack)",
+    description:
+      "LM5175 4-switch buck-boost with external FETs. A plain buck cannot hold 20V from a 24V pack, because the pack sags under motor load until the input sits below the output; this regulates through that crossover. Values follow the datasheet's worked example, so the power stage still needs resizing for the real load current.",
+    params: [
+      { name: "vout", type: "number", default: 20, unit: "V", doc: "Output voltage" },
+      { name: "iout", type: "number", default: 4.5, unit: "A", doc: "Load current (a 90W laptop brick is about 4.5A at 20V)" },
+      { name: "vin_net", type: "string", default: "+24V", doc: "Bus input net" },
+      { name: "vout_net", type: "string", default: "+20V", doc: "Output net" },
+    ],
+    build(params) {
+      const vout = Math.max(1, Number(p(params, "vout", 20)));
+      const voutNet = String(p(params, "vout_net", "+20V"));
+      const vinNet = String(p(params, "vin_net", "+24V"));
+      // The FB reference is 0.8V, with the low-side resistor fixed at 10k.
+      const rhs = (10000 * (vout - 0.8)) / 0.8;
+      return {
+        parts: [
+          { local: "U", libId: "Regulator_Switching:LM5175", value: "LM5175", dx: 0, dy: 0 },
+          { local: "QH1", libId: "Transistor_FET:Power_NMOS_60V", value: "QH1", dx: 60, dy: -40 },
+          { local: "QL1", libId: "Transistor_FET:Power_NMOS_60V", value: "QL1", dx: 60, dy: -16 },
+          { local: "QH2", libId: "Transistor_FET:Power_NMOS_60V", value: "QH2", dx: 100, dy: -40 },
+          { local: "QL2", libId: "Transistor_FET:Power_NMOS_60V", value: "QL2", dx: 100, dy: -16 },
+          { local: "L", libId: "Device:L", value: "4.7u", dx: 80, dy: -52 },
+          { local: "RSNS", libId: "Device:R", value: "8m 2W", dx: 80, dy: 6 },
+          { local: "CIN1", libId: "Device:C", value: "22u/50V", dx: -40, dy: -30 },
+          { local: "CIN2", libId: "Device:C", value: "22u/50V", dx: -32, dy: -30 },
+          { local: "CO1", libId: "Device:C", value: "47u/50V", dx: 124, dy: 4 },
+          { local: "CO2", libId: "Device:C", value: "47u/50V", dx: 132, dy: 4 },
+          { local: "CB1", libId: "Device:C", value: "100n", dx: 44, dy: -52 },
+          { local: "CB2", libId: "Device:C", value: "100n", dx: 116, dy: -52 },
+          { local: "CVCC", libId: "Device:C", value: "2.2u", dx: 24, dy: 34 },
+          { local: "RT", libId: "Device:R", value: "80.6k", dx: -40, dy: 6 },
+          { local: "RMODE", libId: "Device:R", value: "93.1k", dx: -40, dy: 18 },
+          { local: "CSS", libId: "Device:C", value: "100n", dx: -40, dy: 30 },
+          { local: "CSLOPE", libId: "Device:C", value: "100p", dx: -40, dy: 42 },
+          { local: "RCOMP", libId: "Device:R", value: "10k", dx: -56, dy: 30 },
+          { local: "CCOMP", libId: "Device:C", value: "4700p", dx: -56, dy: 42 },
+          { local: "RUV1", libId: "Device:R", value: "59k", dx: -56, dy: -14 },
+          { local: "RUV2", libId: "Device:R", value: "249k", dx: -56, dy: -28 },
+          { local: "RHS", libId: "Device:R", value: nearestE96(rhs), dx: 148, dy: 22 },
+          { local: "RLS", libId: "Device:R", value: "10k", dx: 148, dy: 34 },
+        ],
+        wires: [
+          { a: { local: "RHS", pin: "2" }, b: { local: "RLS", pin: "1" } },
+          { a: { local: "RCOMP", pin: "2" }, b: { local: "CCOMP", pin: "1" } },
+          { a: { local: "RUV2", pin: "2" }, b: { local: "RUV1", pin: "1" } },
+        ],
+        nets: [
+          { local: "U", pin: "2", label: vinNet },
+          { local: "U", pin: "3", label: vinNet },
+          { local: "U", pin: "1", label: "BB_UVLO" },
+          { local: "U", pin: "4", label: "BB_MODE" },
+          { local: "U", pin: "5", label: "GND" },
+          { local: "U", pin: "6", label: "BB_RT" },
+          { local: "U", pin: "7", label: "BB_SLOPE" },
+          { local: "U", pin: "8", label: "BB_SS" },
+          { local: "U", pin: "9", label: "BB_COMP" },
+          { local: "U", pin: "10", label: "GND" },
+          { local: "U", pin: "11", label: "BB_FB" },
+          { local: "U", pin: "12", label: voutNet },
+          { local: "U", pin: "13", label: "BB_ISNS" },
+          { local: "U", pin: "14", label: "BB_ISNS" },
+          { local: "U", pin: "15", label: "GND" },
+          { local: "U", pin: "16", label: "BB_CS" },
+          { local: "U", pin: "17", label: "BB_PGOOD" },
+          { local: "U", pin: "18", label: "SW2" },
+          { local: "U", pin: "19", label: "HDRV2" },
+          { local: "U", pin: "20", label: "BOOT2" },
+          { local: "U", pin: "21", label: "LDRV2" },
+          { local: "U", pin: "22", label: "GND" },
+          { local: "U", pin: "23", label: "BB_VCC" },
+          { local: "U", pin: "24", label: "BB_VCC" },
+          { local: "U", pin: "25", label: "LDRV1" },
+          { local: "U", pin: "26", label: "BOOT1" },
+          { local: "U", pin: "27", label: "HDRV1" },
+          { local: "U", pin: "28", label: "SW1" },
+          { local: "U", pin: "29", label: "GND" },
+          { local: "QH1", pin: "3", label: vinNet },
+          { local: "QH1", pin: "1", label: "HDRV1" },
+          { local: "QH1", pin: "2", label: "SW1" },
+          { local: "QL1", pin: "3", label: "SW1" },
+          { local: "QL1", pin: "1", label: "LDRV1" },
+          { local: "QL1", pin: "2", label: "BB_CS" },
+          { local: "QH2", pin: "3", label: voutNet },
+          { local: "QH2", pin: "1", label: "HDRV2" },
+          { local: "QH2", pin: "2", label: "SW2" },
+          { local: "QL2", pin: "3", label: "SW2" },
+          { local: "QL2", pin: "1", label: "LDRV2" },
+          { local: "QL2", pin: "2", label: "BB_CS" },
+          { local: "L", pin: "1", label: "SW1" },
+          { local: "L", pin: "2", label: "SW2" },
+          { local: "RSNS", pin: "1", label: "BB_CS" },
+          { local: "RSNS", pin: "2", label: "GND" },
+          { local: "CB1", pin: "1", label: "BOOT1" },
+          { local: "CB1", pin: "2", label: "SW1" },
+          { local: "CB2", pin: "1", label: "BOOT2" },
+          { local: "CB2", pin: "2", label: "SW2" },
+          { local: "CIN1", pin: "1", label: vinNet },
+          { local: "CIN1", pin: "2", label: "GND" },
+          { local: "CIN2", pin: "1", label: vinNet },
+          { local: "CIN2", pin: "2", label: "GND" },
+          { local: "CO1", pin: "1", label: voutNet },
+          { local: "CO1", pin: "2", label: "GND" },
+          { local: "CO2", pin: "1", label: voutNet },
+          { local: "CO2", pin: "2", label: "GND" },
+          { local: "CVCC", pin: "1", label: "BB_VCC" },
+          { local: "CVCC", pin: "2", label: "GND" },
+          { local: "RT", pin: "1", label: "BB_RT" },
+          { local: "RT", pin: "2", label: "GND" },
+          { local: "RMODE", pin: "1", label: "BB_MODE" },
+          { local: "RMODE", pin: "2", label: "GND" },
+          { local: "CSS", pin: "1", label: "BB_SS" },
+          { local: "CSS", pin: "2", label: "GND" },
+          { local: "CSLOPE", pin: "1", label: "BB_SLOPE" },
+          { local: "CSLOPE", pin: "2", label: "GND" },
+          { local: "RCOMP", pin: "1", label: "BB_COMP" },
+          { local: "CCOMP", pin: "2", label: "GND" },
+          { local: "RUV2", pin: "1", label: vinNet },
+          { local: "RUV1", pin: "1", label: "BB_UVLO" },
+          { local: "RUV1", pin: "2", label: "GND" },
+          { local: "RHS", pin: "1", label: voutNet },
+          { local: "RHS", pin: "2", label: "BB_FB" },
+          { local: "RLS", pin: "2", label: "GND" },
+        ],
+      };
+    },
+  },
 ];
 
 

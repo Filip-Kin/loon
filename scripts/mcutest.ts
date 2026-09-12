@@ -38,6 +38,8 @@ const ops: Op[] = [
   { op: "instantiate_module", moduleId: "estop_input", params: { net: "ESTOP2" }, at: { x: 60, y: 280 } },
   { op: "instantiate_module", moduleId: "high_side_channel", params: { channel: "CH1", ilim_a: 20 }, at: { x: 400, y: 60 } },
   { op: "instantiate_module", moduleId: "current_sense_i2c", params: { channel: "CH2", amps: 20, addr: 1 }, at: { x: 400, y: 180 } },
+  { op: "instantiate_module", moduleId: "estop_latch", params: { inputs: 2 }, at: { x: 700, y: 120 } },
+  { op: "instantiate_module", moduleId: "buckboost_20v", params: { vout: 20, iout: 4.5 }, at: { x: 700, y: 320 } },
   // A part nobody put in the catalog: declared on the fly, then placed.
   {
     op: "define_symbol",
@@ -71,7 +73,7 @@ check("runtime-declared part placed", schem.symbols.some((s) => s.libId === "Int
 
 // The EN pin, BOOT button and USB pins must actually be wired, not implied.
 const labels = new Set(schem.labels.map((l) => l.text));
-for (const net of ["EN", "IO0_BOOT", "USB_D-", "USB_D+", "+3V3", "GND", "SCL", "SDA", "ESTOP1", "ESTOP2", "CH1_IMON"]) {
+for (const net of ["EN", "IO0_BOOT", "USB_D-", "USB_D+", "+3V3", "GND", "SCL", "SDA", "ESTOP1", "ESTOP2", "CH1_IMON", "ESTOP_RUN", "ESTOP_TRIP", "CLR_N", "WDT_KICK", "WDT_FAIL", "+20V", "SW1", "SW2"]) {
   check(`net ${net} exists`, labels.has(net));
 }
 
