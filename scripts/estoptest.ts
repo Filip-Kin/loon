@@ -30,6 +30,9 @@ applyOps(schem, ops, resolve);
 applyOps(schem, [{ op: "rename_net", from: "CH1_EN_MCU", to: "ESTOP_RUN" }], resolve);
 
 const nl = buildNetlist(schem, defs);
+// Internal module nets carry a per-instance suffix now, so look them up by the
+// name the circuit is known by rather than by an exact string.
+const netNamed = (base: string) => nl.nets.map((n) => n.name).find((n) => n === base || n.startsWith(base + "_")) ?? base;
 const { models } = buildModels(schem, defs, nl);
 const inputs = deriveInputs(models);
 console.log("controls:", inputs.map((i) => i.label).join(" | "));
@@ -37,10 +40,13 @@ const watches = suggestedWatches(nl);
 console.log("watching:", watches.join(", "));
 
 const sim = new LogicSim(models, inputs);
+const CLR = netNamed("CLR_N");
+const TRIP = netNamed("ESTOP_TRIP");
+const FAIL = netNamed("WDT_FAIL");
 // Arming only takes when the latch is not being cleared: the board decides
 // when it is ready, the firmware only asks.
 const arm = () => {
-  for (let i = 0; i < 50 && sim.level("CLR_N") !== 1; i++) sim.step(5);
+  for (let i = 0; i < 50 && sim.level(CLR) !== 1; i++) sim.step(5);
   inputs.find((i) => i.id === "ARM")!.pressed = true;
   sim.step(5);
   inputs.find((i) => i.id === "ARM")!.pressed = false;
@@ -56,7 +62,7 @@ const show = (label: string) => {
 // power-on RC holds the latch clear low.
 sim.step(5);
 const early = sim.snapshot(watches);
-check("the power-on RC holds the clear line low at first", early.levels["CLR_N"] === 0, JSON.stringify(early.levels["CLR_N"]));
+check("the power-on RC holds the clear line low at first", early.levels[CLR] === 0, JSON.stringify(early.levels[CLR]));
 sim.step(60);
 let s = show("after power-up");
 check("board comes up stopped", s.levels["ESTOP_RUN"] !== 1);
@@ -73,7 +79,7 @@ e1.pressed = true;
 sim.step(20);
 s = show("e-stop 1 pressed");
 check("pressing an e-stop stops the board", s.levels["ESTOP_RUN"] === 0);
-check("the trip line went high", s.levels["ESTOP_TRIP"] === 1);
+check("the trip line went high", s.levels[TRIP] === 1);
 
 // Release it: the latch must stay stopped until armed again.
 e1.pressed = false;
@@ -91,7 +97,7 @@ inputs.find((i) => i.id === "MCU")!.alive = false;
 sim.step(100);
 s = show("firmware stopped kicking");
 check("a dead MCU stops the board through hardware", s.levels["ESTOP_RUN"] === 0);
-check("the watchdog raised the fail line", s.levels["WDT_FAIL"] === 1 || s.levels["ESTOP_TRIP"] === 1);
+check("the watchdog raised the fail line", s.levels[FAIL] === 1 || s.levels[TRIP] === 1);
 
 console.log(failures === 0 ? "\nE-STOP TEST PASS" : `\nE-STOP TEST FAIL (${failures})`);
 if (failures > 0) process.exit(1);

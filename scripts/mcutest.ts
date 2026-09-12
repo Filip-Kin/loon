@@ -73,8 +73,10 @@ check("runtime-declared part placed", schem.symbols.some((s) => s.libId === "Int
 
 // The EN pin, BOOT button and USB pins must actually be wired, not implied.
 const labels = new Set(schem.labels.map((l) => l.text));
+// Nets internal to a module are suffixed per instance; match on the base name.
+const hasNet = (base: string) => [...labels].some((l) => l === base || l.startsWith(base + "_"));
 for (const net of ["EN", "IO0_BOOT", "USB_D-", "USB_D+", "+3V3", "GND", "SCL", "SDA", "ESTOP1", "ESTOP2", "CH1_IMON", "ESTOP_RUN", "ESTOP_TRIP", "CLR_N", "WDT_KICK", "WDT_FAIL", "+20V", "SW1", "SW2"]) {
-  check(`net ${net} exists`, labels.has(net));
+  check(`net ${net} exists`, hasNet(net));
 }
 
 const budgets = pinBudget(schem);

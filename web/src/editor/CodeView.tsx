@@ -39,12 +39,21 @@ export function CodeView({ project, schem, flash }: Props) {
       const list = await trpc.firmware.files.query({ project });
       setFiles(list);
       if (!path && list.length) openFile(list.find((f) => f.path.endsWith("main.cpp"))?.path ?? list[0].path);
+      return list;
     } catch (e: any) {
       flash(String(e?.message ?? e), true);
+      return [];
     }
   }
 
-  useEffect(() => { refreshFiles(); }, [project]);
+  // Opening the code view on a board with no firmware scaffolds it: the pin
+  // header, platformio.ini and a starter main.cpp, all from the schematic.
+  useEffect(() => {
+    (async () => {
+      const list = await refreshFiles();
+      if (list.length === 0 && schem && schem.symbols.length > 0) await sync();
+    })();
+  }, [project, schem]);
 
   async function openFile(p: string) {
     try {

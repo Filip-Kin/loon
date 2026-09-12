@@ -49,10 +49,15 @@ export function PcbCanvas({ project, schem, flash }: Props) {
   useEffect(() => {
     (async () => {
       const res = await trpc.pcb.load.query({ project });
-      if (res.board) setBoard(res.board as Board);
-      if (schem) setFps(await trpc.pcb.footprints.mutate({ schem }));
+      if (res.board) {
+        setBoard(res.board as Board);
+        if (schem) setFps(await trpc.pcb.footprints.mutate({ schem }));
+        return;
+      }
+      // No board yet: opening this view is the request for one.
+      if (schem && schem.symbols.length > 0) await generate(false);
     })().catch((e) => flash(String(e?.message ?? e), true));
-  }, [project]);
+  }, [project, schem]);
 
   const rats = useMemo(() => (board ? ratsnest(board, fps) : []), [board, fps]);
 

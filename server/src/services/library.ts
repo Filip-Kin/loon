@@ -351,7 +351,37 @@ class Library {
   }
 
   get(libId: string): LibEntry | undefined {
-    return this.entries.get(libId);
+    const hit = this.entries.get(libId);
+    if (hit) return hit;
+    // A power symbol is a named net flag and nothing more, so any power:NAME
+    // the design asks for is generated rather than refused. Without this,
+    // naming a signal net this way fails and every op that referenced it
+    // fails behind it.
+    if (libId.startsWith("power:")) {
+      const name = libId.slice("power:".length);
+      if (!name || !/^[A-Za-z0-9_+\-.]+$/.test(name)) return undefined;
+      const def = buildIcSymbol({
+        libId,
+        refPrefix: "#PWR",
+        value: name,
+        description: `Net flag ${name}`,
+        pins: [{ number: "1", name, type: "power_in", side: "left" }],
+      });
+      const part: PartSummary = {
+        id: libId,
+        libId,
+        name,
+        description: def.description ?? "",
+        refPrefix: "#PWR",
+        keywords: "power net flag",
+        footprints: [],
+        sources: [{ source: "kicad", available: true }],
+      };
+      const entry: LibEntry = { def, raw: emitLibSymbol(def), part };
+      this.entries.set(libId, entry);
+      return entry;
+    }
+    return undefined;
   }
 
   rawMap(libIds: string[]): Record<string, SxList> {

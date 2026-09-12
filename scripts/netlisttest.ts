@@ -34,6 +34,8 @@ const stats = summarizeNets(nl);
 console.log(`nets: ${stats.total} (${stats.power} power, ${stats.singlePin} single-pin)`);
 
 const byName = new Map(nl.nets.map((n) => [n.name, n]));
+// Internal module nets carry a per-instance suffix, so resolve by base name.
+const net = (base: string) => byName.get(base) ?? nl.nets.find((n) => n.name.startsWith(base + "_"));
 check("3V3 rail exists and is shared", (byName.get("+3V3")?.pins.length ?? 0) > 5);
 check("GND exists and is shared", (byName.get("GND")?.pins.length ?? 0) > 8);
 
@@ -52,7 +54,7 @@ const dm = byName.get("USB_D-");
 check("USB_D- joins the ESD array and the MCU", !!dm && dm.pins.some((p) => p.libId.includes("ESP32")) && dm.pins.some((p) => p.libId.includes("USBLC6")));
 
 // The latch's trip node must gather both e-stops and the watchdog.
-const trip = byName.get("ESTOP_TRIP");
+const trip = net("ESTOP_TRIP");
 check("ESTOP_TRIP gathers 2 e-stop diodes, the watchdog diode, the pulldown and the inverter", (trip?.pins.length ?? 0) >= 5, String(trip?.pins.length));
 
 const wdt = byName.get("WDT_KICK");

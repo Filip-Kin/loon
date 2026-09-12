@@ -4,6 +4,7 @@ import type { PinRef } from "@loon/shared/ops";
 import { instanceBBox, snapPoint, PLACE_GRID, dist, type Placement } from "@loon/shared/geometry";
 import { deriveBlocks } from "@loon/shared/blocks";
 import { SymbolView, collectPins, type PinHandle } from "../lib/render";
+import { moduleSummaries } from "@loon/shared/modules";
 
 export type Tool = "select" | "place" | "wire";
 export interface Viewport { x: number; y: number; scale: number }
@@ -232,12 +233,15 @@ export function Canvas(props: Props) {
           }
           if (!isFinite(minx)) return null;
           const pad = 2.5;
-          const label = `${b.moduleId}${Object.keys(b.params).length ? " " + Object.entries(b.params).map(([k, v]) => `${k}=${v}`).join(" ") : ""}`;
+          const mod = moduleSummaries().find((m) => m.id === b.moduleId);
+          const label = mod?.name ?? b.moduleId;
+          const sub = Object.entries(b.params).map(([k, v]) => `${k}=${v}`).join("  ");
           return (
             <g key={b.id}>
               <rect x={minx - pad} y={miny - pad} width={maxx - minx + pad * 2} height={maxy - miny + pad * 2}
                 rx={1.5} fill="rgba(124,58,237,0.05)" stroke="rgba(124,58,237,0.5)" strokeWidth={0.25} strokeDasharray="1.5 1" vectorEffect="non-scaling-stroke" />
-              <text x={minx - pad + 0.5} y={miny - pad - 0.8} fontSize={1.6} fill="#9a6bff">{label}</text>
+              <text x={minx - pad + 0.5} y={miny - pad - 2.6} fontSize={2.6} fontWeight={600} fill="#c3a9ff" stroke="#14151a" strokeWidth={0.7} paintOrder="stroke" strokeLinejoin="round">{label}</text>
+              {sub && <text x={minx - pad + 0.5} y={miny - pad - 0.6} fontSize={1.5} fill="#8d7ab8" stroke="#14151a" strokeWidth={0.5} paintOrder="stroke" strokeLinejoin="round">{sub}</text>}
             </g>
           );
         })}

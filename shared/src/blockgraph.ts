@@ -64,6 +64,17 @@ export function buildBlockGraph(schem: Schematic, resolve?: DefResolver, netlist
 
   const blockOfRef = new Map<string, string>();
   const graphBlocks: GraphBlock[] = [];
+  // Parts placed outside any module become one-part nodes, so the graph shows
+  // the whole board rather than only the parts that came from a module.
+  const looseGroups: Block[] = schem.symbols
+    .filter((s) => !s.properties.LoonBlock && !s.libId.startsWith("power:"))
+    .map((s) => ({
+      id: `loose:${s.uuid}`,
+      moduleId: s.properties.Value || s.libId.split(":")[1] || "part",
+      params: {},
+      memberUuids: [s.uuid],
+    }));
+  blocks.push(...looseGroups);
   for (const b of blocks) {
     const members = b.memberUuids.map((u) => byUuid.get(u)).filter(Boolean) as typeof schem.symbols;
     if (members.length === 0) continue;
@@ -132,9 +143,7 @@ export function buildBlockGraph(schem: Schematic, resolve?: DefResolver, netlist
     b.ports.sort((x, y) => Number(x.isPower) - Number(y.isPower) || x.net.localeCompare(y.net));
   }
 
-  const looseRefs = schem.symbols
-    .filter((s) => !s.properties.LoonBlock && !s.libId.startsWith("power:"))
-    .map((s) => s.properties.Reference ?? "?");
+  const looseRefs: string[] = [];
 
   return { blocks: graphBlocks, links, looseRefs };
 }

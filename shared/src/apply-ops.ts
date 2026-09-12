@@ -6,7 +6,7 @@
 import type { Schematic, SymbolInstance, LibSymbol, Point } from "./schematic";
 import type { Op, OpResult } from "./ops";
 import { findPin, pinWorld, routeOrthogonal, snapPoint, instanceBBox, PLACE_GRID } from "./geometry";
-import { MODULES } from "./modules";
+import { MODULES, type ModuleNet } from "./modules";
 import { buildIcSymbol } from "./symbolgen";
 
 export interface ResolvedPart {
@@ -328,6 +328,11 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       // share them, with a single label left on the net so other blocks can
       // still join it by name. Power rails stay label-only: chaining every GND
       // pin into one polyline is spaghetti, and rails are understood by name.
+      // Internal nets get a per-instance suffix taken from the block's first
+      // part, so two instances of one module cannot share a switch node.
+      const instanceTag = localToRef.get(block.parts[0]?.local ?? "") ?? blockId.slice(0, 4);
+      const scopedLabel = (net: ModuleNet) => (net.scope === "local" ? `${net.label}_${instanceTag}` : net.label);
+
       const netPoints = new Map<string, { at: Point; first: boolean }[]>();
       for (const net of block.nets) {
         const ref = localToRef.get(net.local);
@@ -336,9 +341,10 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
         const pin = def ? findPin(def, net.pin) ?? def.pins.find((pp) => pp.name.toLowerCase() === net.pin.toLowerCase()) : undefined;
         if (!inst || !pin) continue;
         const at = pinWorld(pin, inst);
-        const list = netPoints.get(net.label) ?? [];
+        const label = scopedLabel(net);
+        const list = netPoints.get(label) ?? [];
         list.push({ at, first: list.length === 0 });
-        netPoints.set(net.label, list);
+        netPoints.set(label, list);
       }
       // Obstacles: every pin not on this net, and every symbol body.
       const memberRefs = new Set(localToRef.values());
@@ -368,14 +374,23 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
               if (d < bestD) { bestD = d; bestIdx = i; }
             }
             const next = remaining.splice(bestIdx, 1)[0];
-            const route = routeOrthogonal(cur, next);
+            // Candidate routes, cheapest-looking first: straight, both L
+            // shapes, then a Z through the channel between them.
+            const mid = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 };
+            const candidates: Point[][] = [
+              routeOrthogonal(cur, next),
+              [cur, { x: cur.x, y: next.y }, next],
+              [cur, { x: mid.x, y: cur.y }, { x: mid.x, y: next.y }, next],
+              [cur, { x: cur.x, y: mid.y }, { x: next.x, y: mid.y }, next],
+            ];
             const onNet = new Set(pts.map((pp) => `${pp.at.x},${pp.at.y}`));
             const obstacles = {
               pins: allPinPoints.filter((pp) => !onNet.has(`${pp.at.x},${pp.at.y}`)).map((pp) => pp.at),
               boxes: bodyBoxes,
             };
-            if (routeIsClear(route, obstacles)) {
-              schem.wires.push({ uuid: newUuid(), pts: route });
+            const clear = candidates.find((r) => routeIsClear(r, obstacles));
+            if (clear) {
+              schem.wires.push({ uuid: newUuid(), pts: clear });
             } else {
               // Blocked: fall back to joining by name at both ends.
               blockedEnds.push(cur, next);
