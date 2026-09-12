@@ -74,6 +74,26 @@ const projectRouter = router({
     }),
 });
 
+// A whole-board prompt can run for many minutes. Holding an HTTP request open
+// that long is at the mercy of every proxy in front of us, so the generation
+// runs as a job and the browser polls it.
+interface AiJob {
+  id: string;
+  started: number;
+  state: "running" | "done" | "error";
+  message?: string;
+  ops?: unknown[];
+  schem?: Schematic;
+  results?: unknown[];
+  error?: string;
+}
+const aiJobs = new Map<string, AiJob>();
+
+function reapJobs() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [id, job] of aiJobs) if (job.started < cutoff) aiJobs.delete(id);
+}
+
 const aiRouter = router({
   generate: publicProcedure
     .input(z.object({ message: z.string(), schem: z.any() }))
@@ -82,6 +102,47 @@ const aiRouter = router({
       const ai = await generateOps(input.message, schem);
       const { results } = applyOps(schem, ai.ops, makeResolver(schem));
       return { message: ai.message, ops: ai.ops, schem, results, raw: ai.raw };
+    }),
+
+  start: publicProcedure
+    .input(z.object({ message: z.string(), schem: z.any() }))
+    .mutation(({ input }) => {
+      reapJobs();
+      const id = crypto.randomUUID();
+      const schem = input.schem as Schematic;
+      const job: AiJob = { id, started: Date.now(), state: "running" };
+      aiJobs.set(id, job);
+      (async () => {
+        try {
+          const ai = await generateOps(input.message, schem);
+          const { results } = applyOps(schem, ai.ops, makeResolver(schem));
+          job.message = ai.message;
+          job.ops = ai.ops;
+          job.schem = schem;
+          job.results = results;
+          job.state = "done";
+        } catch (e: any) {
+          job.error = String(e?.message ?? e);
+          job.state = "error";
+        }
+      })();
+      return { id };
+    }),
+
+  status: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const job = aiJobs.get(input.id);
+      if (!job) return { state: "error" as const, error: "That job is gone. The server probably restarted.", elapsedMs: 0 };
+      return {
+        state: job.state,
+        elapsedMs: Date.now() - job.started,
+        message: job.message,
+        ops: job.ops,
+        schem: job.schem,
+        results: job.results,
+        error: job.error,
+      };
     }),
 });
 

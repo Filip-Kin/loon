@@ -5,11 +5,12 @@ export interface ChatMsg { role: "user" | "bot" | "err"; text: string }
 interface Props {
   messages: ChatMsg[];
   busy: boolean;
+  elapsed: number;
   aiAvailable: boolean;
   onSend: (text: string) => void;
 }
 
-export function AiPanel({ messages, busy, aiAvailable, onSend }: Props) {
+export function AiPanel({ messages, busy, elapsed, aiAvailable, onSend }: Props) {
   const [text, setText] = useState("");
   function send() {
     const t = text.trim();
@@ -27,7 +28,12 @@ export function AiPanel({ messages, busy, aiAvailable, onSend }: Props) {
         {messages.map((m, i) => (
           <div key={i} className={"msg " + m.role}>{m.text}</div>
         ))}
-        {busy && <div className="msg bot">Thinking...</div>}
+        {busy && (
+          <div className="msg bot">
+            Working... {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+            {elapsed > 90 && <div style={{ opacity: 0.7, marginTop: 4 }}>A whole-board prompt takes several minutes. This keeps running even if you switch tabs.</div>}
+          </div>
+        )}
       </div>
       <div className="composer">
         <textarea

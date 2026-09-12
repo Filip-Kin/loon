@@ -16,6 +16,10 @@ import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
 
 const CLAUDE_BIN = process.env.LOON_CLAUDE_BIN || "claude";
+// A whole-board prompt takes minutes to answer. The old 3 minute cap killed the
+// model mid-answer and surfaced as "claude exited 143" (SIGTERM), which looks
+// like a crash and is not one.
+const AI_TIMEOUT_MS = Number(process.env.LOON_AI_TIMEOUT_MS ?? 900_000);
 
 export interface AiResult {
   message: string;
@@ -153,17 +157,23 @@ function extractJson(text: string): { message: string; ops: Op[] } {
 
 async function runClaude(prompt: string): Promise<string> {
   const cwd = mkdtempSync(join(tmpdir(), "loon-ai-"));
-  const proc = Bun.spawn([CLAUDE_BIN, "-p", prompt, "--output-format", "json"], {
+  // "" disables every built-in tool: this is a pure text-to-JSON transform, and
+  // a tool call here is wasted minutes on a prompt that is already slow.
+  const proc = Bun.spawn([CLAUDE_BIN, "-p", prompt, "--output-format", "json", "--tools", ""], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env },
   });
-  const timeout = setTimeout(() => proc.kill(), 180_000);
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; proc.kill(); }, AI_TIMEOUT_MS);
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   const code = await proc.exited;
   clearTimeout(timeout);
+  if (timedOut) {
+    throw new Error(`The model ran past ${Math.round(AI_TIMEOUT_MS / 60000)} minutes and was stopped. Split the request into two or three smaller ones, or raise LOON_AI_TIMEOUT_MS.`);
+  }
   if (code !== 0) {
     throw new Error(`claude exited ${code}: ${stderr.slice(0, 500) || stdout.slice(0, 500)}`);
   }

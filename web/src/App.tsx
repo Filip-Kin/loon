@@ -24,6 +24,7 @@ export function App() {
   const [viewport, setViewport] = useState<Viewport>({ x: -320, y: -260, scale: 5 });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [aiAvailable, setAiAvailable] = useState(true);
   const [rightTab, setRightTab] = useState<"props" | "ai" | "debug">("ai");
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
@@ -142,21 +143,36 @@ export function App() {
     }
   }
 
+  // The generation runs as a job on the server and we poll it, so a whole-board
+  // prompt cannot be cut short by a proxy or a request timeout.
   async function aiSend(text: string) {
     if (!schem) return;
     setMessages((m) => [...m, { role: "user", text }]);
     setBusy(true);
+    setElapsed(0);
+    const started = Date.now();
+    const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const res = await trpc.ai.generate.mutate({ message: text, schem });
+      const { id } = await trpc.ai.start.mutate({ message: text, schem });
+      let res: any = null;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const st: any = await trpc.ai.status.query({ id });
+        if (st.state === "running") continue;
+        if (st.state === "error") throw new Error(st.error ?? "generation failed");
+        res = st;
+        break;
+      }
       if (schem) { past.current.push(schem); future.current = []; }
       setSchem(res.schem as Schematic);
-      const failed = res.results.filter((r) => !r.ok);
-      let note = res.message || `Applied ${res.ops.length} operation(s).`;
-      if (failed.length) note += `\n(${failed.length} failed: ${failed.map((f) => f.error).join("; ")})`;
+      const failed = (res.results ?? []).filter((r: any) => !r.ok);
+      let note = res.message || `Applied ${(res.ops ?? []).length} operation(s).`;
+      if (failed.length) note += `\n(${failed.length} failed: ${failed.map((f: any) => f.error).join("; ")})`;
       setMessages((m) => [...m, { role: "bot", text: note }]);
     } catch (e: any) {
       setMessages((m) => [...m, { role: "err", text: String(e?.message ?? e) }]);
     }
+    clearInterval(tick);
     setBusy(false);
   }
 
@@ -304,7 +320,7 @@ export function App() {
           {rightTab === "debug" ? (
             <DebugPanel />
           ) : rightTab === "ai" ? (
-            <AiPanel messages={messages} busy={busy} aiAvailable={aiAvailable} onSend={aiSend} />
+            <AiPanel messages={messages} busy={busy} elapsed={elapsed} aiAvailable={aiAvailable} onSend={aiSend} />
           ) : (
             <PropertiesPanel
               inst={selInst}
