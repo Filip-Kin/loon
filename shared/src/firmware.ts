@@ -106,6 +106,16 @@ export function generatePlatformIni(target: FirmwareTarget): string {
     "    -DARDUINO_USB_CDC_ON_BOOT=1",
     "    -DARDUINO_USB_MODE=1",
     "",
+    "; The emulator has no USB peripheral, so the simulation build prints to",
+    "; UART0 instead. Same code, different console.",
+    "[env:sim]",
+    "platform = espressif32",
+    `board = ${isS3 ? "esp32-s3-devkitc-1" : "esp32dev"}`,
+    "framework = arduino",
+    "monitor_speed = 115200",
+    "build_flags =",
+    "    -DARDUINO_USB_CDC_ON_BOOT=0",
+    "",
   ].join("\n");
 }
 

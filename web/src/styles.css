@@ -107,25 +107,43 @@ svg.canvas.panning { cursor: grabbing; }
 .viewswitch { display: flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; }
 .viewswitch button { border: 0; border-radius: 0; background: transparent; padding: 5px 10px; }
 .viewswitch button.on { background: var(--accent, #7c3aed); color: #fff; }
-.blockwrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.blockwrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .blockbar { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-.blockcanvas { flex: 1; width: 100%; background: #0f1014; cursor: grab; }
+.blockcanvas { flex: 1; width: 100%; min-height: 0; background: #0f1014; cursor: grab; }
 .modulepick { position: absolute; top: 42px; left: 10px; z-index: 5; width: 330px; max-height: 70%; overflow: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .mod-row { padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .mod-row:hover { background: var(--panel-2); }
 .mod-row .name { font-size: 13px; }
 .mod-row .desc { font-size: 11.5px; color: var(--text-faint); line-height: 1.35; }
 
-.pcbwrap { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.simwrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.simbar { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.simbody { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.simbody.column { flex-direction: column; gap: 8px; padding: 10px; overflow: auto; }
+.simcontrols { width: 300px; border-right: 1px solid var(--line); overflow: auto; padding-bottom: 10px; }
+.simnets { flex: 1; overflow: auto; min-width: 0; }
+.simhead { padding: 8px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.simctl { padding: 7px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.simctl .lbl { font-size: 12.5px; color: var(--text-dim); }
+.simctlrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.simctlrow label { font-size: 12px; color: var(--text-faint); }
+.netline { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.netline .name { width: 150px; font-family: ui-monospace, monospace; font-size: 12.5px; }
+.netline .lvl { width: 70px; font-size: 11.5px; }
+.netline .trace { flex: 1; height: 20px; min-width: 60px; }
+.plot { width: 100%; height: 260px; background: #0b0c10; border: 1px solid var(--line); border-radius: 8px; }
+.buildlog.tall { height: 320px; }
+
+.pcbwrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .pcbbar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .pcbbar .spacer { flex: 1; }
-.pcbcanvas { flex: 1; width: 100%; background: #0b0f0b; cursor: crosshair; }
+.pcbcanvas { flex: 1; width: 100%; min-height: 0; background: #0b0f0b; cursor: crosshair; }
 .linkbtn { font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 7px; color: var(--text); text-decoration: none; }
 .linkbtn:hover { background: var(--panel-2); }
 .drclist { max-height: 150px; overflow: auto; border-top: 1px solid var(--line); }
 .pcbhint { padding: 6px 10px; font-size: 11.5px; color: var(--text-faint); border-top: 1px solid var(--line); }
 
-.codeview { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.codeview { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .codebar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .codebar .spacer { flex: 1; }
 .codebody { flex: 1; display: flex; min-height: 0; }

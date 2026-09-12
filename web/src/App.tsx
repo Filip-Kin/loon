@@ -4,6 +4,7 @@ import { Canvas, type Tool, type Viewport } from "./editor/Canvas";
 import { BlockCanvas } from "./editor/BlockCanvas";
 import { CodeView } from "./editor/CodeView";
 import { PcbCanvas } from "./editor/PcbCanvas";
+import { SimView } from "./editor/SimView";
 import type { GraphBlock } from "@loon/shared/blockgraph";
 import { PartsPanel } from "./panels/PartsPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
@@ -37,7 +38,7 @@ export function App() {
   const [nets, setNets] = useState<{ name: string; isPower: boolean; pins: string[] }[]>([]);
   const [checking, setChecking] = useState(false);
   const [highlightNet, setHighlightNet] = useState<string | null>(null);
-  const [view, setView] = useState<"schematic" | "blocks" | "pcb" | "code">("schematic");
+  const [view, setView] = useState<"schematic" | "blocks" | "pcb" | "code" | "sim">("schematic");
   const [blockSel, setBlockSel] = useState<string | null>(null);
   const [blockViewport, setBlockViewport] = useState<Viewport>({ x: 40, y: 40, scale: 1.6 });
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
@@ -325,6 +326,7 @@ export function App() {
           <button className={view === "schematic" ? "on" : ""} onClick={() => setView("schematic")}>Schematic</button>
           <button className={view === "pcb" ? "on" : ""} onClick={() => setView("pcb")}>PCB</button>
           <button className={view === "code" ? "on" : ""} onClick={() => setView("code")}>Code</button>
+          <button className={view === "sim" ? "on" : ""} onClick={() => setView("sim")}>Simulate</button>
         </div>
         {view === "schematic" && <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>}
         {view === "schematic" && <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>}
@@ -341,6 +343,7 @@ export function App() {
         <div className="canvas-wrap">
           {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} />}
           {view === "pcb" && <PcbCanvas project={projectName} schem={schem} flash={flash} />}
+          {view === "sim" && <SimView project={projectName} schem={schem} defs={renderDefs} flash={flash} />}
           {schem && view === "blocks" && (
             <BlockCanvas
               schem={schem}

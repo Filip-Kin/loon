@@ -13,6 +13,8 @@ import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
 import { serializeBoard, serializeProject } from "@loon/shared/kicad-pcb";
 import { runKicadDrc } from "../services/kicad";
+import { startSpice, startQemu, getSim } from "../services/sim";
+import { buildSpiceDeck, parseWrdata, type SpiceBench } from "@loon/shared/spice";
 import { OSHPARK_2LAYER, OSHPARK_4LAYER, type Board } from "@loon/shared/board";
 import { emptySchematic, type Schematic, type LibSymbol } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
@@ -389,9 +391,50 @@ const pcbRouter = router({
     }),
 });
 
+// #region simulation
+// SPICE for what the volts do, QEMU for what the firmware does.
+const simRouter = router({
+  deck: publicProcedure
+    .input(z.object({ schem: z.any(), bench: z.any() }))
+    .query(({ input }) => {
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      return buildSpiceDeck(schem, input.bench as SpiceBench, defs);
+    }),
+
+  spice: publicProcedure
+    .input(z.object({ project: z.string(), schem: z.any(), bench: z.any() }))
+    .mutation(({ input }) => {
+      const schem = input.schem as Schematic;
+      const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
+      const deck = buildSpiceDeck(schem, input.bench as SpiceBench, defs);
+      const job = startSpice(input.project, deck.text);
+      return { id: job.id, unmodelled: deck.unmodelled, deck: deck.text };
+    }),
+
+  qemu: publicProcedure
+    .input(z.object({ project: z.string(), seconds: z.number().optional() }))
+    .mutation(({ input }) => ({ id: startQemu(input.project, input.seconds ?? 12).id })),
+
+  status: publicProcedure
+    .input(z.object({ id: z.string(), probes: z.array(z.string()).optional() }))
+    .query(({ input }) => {
+      const job = getSim(input.id);
+      if (!job) return { state: "error" as const, log: "", error: "That run is gone (the server restarted)." };
+      return {
+        state: job.state,
+        log: job.log.slice(-30000),
+        error: job.error,
+        elapsedMs: Date.now() - job.started,
+        series: job.data ? parseWrdata(job.data, input.probes ?? []) : undefined,
+      };
+    }),
+});
+
 export const appRouter = router({
   design: designRouter,
   pcb: pcbRouter,
+  sim: simRouter,
   firmware: firmwareRouter,
   library: librouter,
   project: projectRouter,
