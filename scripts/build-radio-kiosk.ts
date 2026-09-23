@@ -234,14 +234,59 @@ const RJ45: IcSymbolSpec = {
   pins: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ number: String(n), name: String(n), type: "passive" as const, side: "left" as const })),
 };
 
+const LTC4279: IcSymbolSpec = {
+  libId: "Power_Management:LTC4279",
+  refPrefix: "U",
+  value: "LTC4279IS#PBF",
+  description:
+    "Autonomous single-port 802.3at PSE controller, SO-16. Does detection, classification, inrush, current limit and disconnect on its own; the MCU only holds RESET and reads LED. Its 'AGND' is the port positive (54 V) and its 'VEE' is board ground: the external FET switches the port negative.",
+  keywords: "poe pse controller 802.3at power sourcing",
+  datasheet: "https://www.analog.com/media/en/technical-documentation/data-sheets/4279fa.pdf",
+  footprint: "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+  pins: [
+    { number: "1", name: "MID", type: "input", side: "left" },
+    { number: "2", name: "DNC", type: "no_connect", side: "left" },
+    { number: "3", name: "DNC", type: "no_connect", side: "left" },
+    { number: "4", name: "VSSK", type: "input", side: "left" },
+    { number: "5", name: "SENSE", type: "input", side: "left" },
+    { number: "6", name: "GATE", type: "output", side: "left" },
+    { number: "7", name: "OUT", type: "input", side: "left" },
+    { number: "8", name: "AGND", type: "power_in", side: "left" },
+    { number: "9", name: "LED", type: "open_collector", side: "right" },
+    { number: "10", name: "VEE", type: "power_in", side: "right" },
+    { number: "11", name: "DNC", type: "no_connect", side: "right" },
+    { number: "12", name: "PWRMODE", type: "passive", side: "right" },
+    { number: "13", name: "LEGACY", type: "input", side: "right" },
+    { number: "14", name: "DUALPD", type: "input", side: "right" },
+    { number: "15", name: "DNC", type: "no_connect", side: "right" },
+    { number: "16", name: "RESET", type: "input", side: "right" },
+  ],
+};
+
+const PSMN075: IcSymbolSpec = {
+  libId: "Transistor_FET:PSMN075-100MSEX",
+  refPrefix: "Q",
+  value: "PSMN075-100MSEX",
+  description: "100 V N-channel MOSFET in LFPAK33, the part ADI recommends for the LTC4279 port switch (its SOA is what matters, not RDS(on)). Pins 1-3 source, 4 gate, tab drain.",
+  keywords: "mosfet n-channel poe pse switch lfpak33",
+  footprint: FP.lfpak33,
+  pins: [
+    { number: "1", name: "S", type: "passive", side: "left" },
+    { number: "2", name: "S", type: "passive", side: "left" },
+    { number: "3", name: "S", type: "passive", side: "left" },
+    { number: "4", name: "G", type: "input", side: "left" },
+    { number: "5", name: "D", type: "passive", side: "right" },
+  ],
+};
+
 const MCU_STUB: IcSymbolSpec = {
-  libId: "Connector:Conn_01x10",
+  libId: "Connector:Conn_01x12",
   refPrefix: "J",
-  value: "Conn_01x10",
-  description: "Ten-pin 2.54 mm header.",
+  value: "Conn_01x12",
+  description: "Twelve-pin 2.54 mm header.",
   keywords: "connector header",
-  footprint: "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical",
-  pins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
+  footprint: "Connector_PinHeader_2.54mm:PinHeader_1x12_P2.54mm_Vertical",
+  pins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
 };
 
 // #region sheet
@@ -258,7 +303,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, MCU_STUB]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, MCU_STUB]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -417,7 +462,7 @@ export function buildRadioKiosk(): Schematic {
   for (const [pin, net] of [
     ["1", "VIN_SENSE"], ["2", "PACK_SENSE"], ["3", "TEST_LOAD"], ["4", "BK_ON"],
     ["5", "BOOST_SD"], ["6", "PASSIVE_EN"], ["7", "PASSIVE_IMON"], ["8", "PASSIVE_FLT"],
-    ["9", "+3V3"], ["10", "GND"],
+    ["9", "PSE_EN"], ["10", "PSE_ON"], ["11", "+3V3"], ["12", "GND"],
   ] as const) label("J4", pin, net);
 
   // #region stage 2: radio port
@@ -429,7 +474,10 @@ export function buildRadioKiosk(): Schematic {
   // the 12 V rail, and the boost diode blocks 12 V from reaching the boost.
   const px = 560, py = 40;
 
-  // 12 V -> 54 V boost, LM3478 at 400 kHz. Sized for the radio (10-15 W), not a
+  // 12 V -> 54 V boost, LM3478 at 400 kHz. Its output is PORT_P itself: the
+  // port positive, the PSE's AGND supply and the eFuse output are one node.
+  // With the boost off that node sits at ~11.5 V through D20, or at 12 V when
+  // the eFuse is on; the PSE is in UVLO below 45 V and holds its switch off. Sized for the radio (10-15 W), not a
   // full 30 W class-4 load: at D = 0.78 the LM3478 has ~84 mV of sense headroom,
   // and 20 mR puts the peak switch limit near 4 A.
   part("U20", LM3478.libId, "LM3478 54V boost", px, py);
@@ -438,16 +486,16 @@ export function buildRadioKiosk(): Schematic {
   part("D20", "Device:D", "SS310 100V Schottky", px + 70, py - 40, FP.sma);
   r("R20", "20m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
   r("R21", "40.2k", px - 30, py + 14, "BOOST_FA", "GND");
-  r("R22", "402k", px + 100, py - 10, "+54V", "BOOST_FB");
+  r("R22", "402k", px + 100, py - 10, "PORT_P", "BOOST_FB");
   r("R23", "9.53k", px + 100, py + 2, "BOOST_FB", "GND");
   c("C20", "100p", px + 110, py + 2, "BOOST_FB", "GND");
   r("R24", "10k", px - 30, py - 10, "BOOST_COMP", "BOOST_COMPC");
   c("C21", "47n", px - 30, py + 2, "BOOST_COMPC", "GND");
   c("C22", "10u/25V", px - 30, py - 30, "+12V", "GND", FP.c1210);
-  c("C23", "4.7u/100V", px + 100, py - 30, "+54V", "GND", FP.c1210);
-  c("C24", "4.7u/100V", px + 108, py - 30, "+54V", "GND", FP.c1210);
+  c("C23", "4.7u/100V", px + 100, py - 30, "PORT_P", "GND", FP.c1210);
+  c("C24", "4.7u/100V", px + 108, py - 30, "PORT_P", "GND", FP.c1210);
   part("C25", "Device:C_Polarized", "47u/63V", px + 120, py - 30, FP.cElec8);
-  label("C25", "1", "+54V");
+  label("C25", "1", "PORT_P");
   label("C25", "2", "GND");
   // Shutdown from the MCU through a diode so R21 alone still sets the frequency.
   r("R25", "1k", px - 50, py + 26, "BOOST_SD", "BOOST_SDD");
@@ -468,7 +516,7 @@ export function buildRadioKiosk(): Schematic {
   label("L20", "1", "+12V");
   label("L20", "2", "BOOST_SW");
   label("D20", "2", "BOOST_SW");
-  label("D20", "1", "+54V");
+  label("D20", "1", "PORT_P");
 
   // Passive path: TPS26600 eFuse. ILIM 8.06k = 1.5 A (R = 12k / I). IMON into
   // 10k gives 0.78 V per amp on PASSIVE_IMON, so 1.5 A reads 1.17 V at the ADC.
@@ -508,6 +556,55 @@ export function buildRadioKiosk(): Schematic {
   label("Q13", "2", "GND");
   label("Q13", "3", "PORT_N");
 
+  // 802.3at PSE: LTC4279 wired per its datasheet Figure 13. Port positive is
+  // PORT_P (the chip's AGND supply, through the 10 R surge resistor), board
+  // ground is the chip's VEE, and Q22 switches the port negative. PWRMODE 3.32k
+  // = Type 2 (25.5 W). MID / LEGACY / DUALPD low: endpoint, IEEE PDs only, no
+  // dual-signature. RESET is pulled down so the port stays off until the MCU
+  // raises PSE_EN; LED is open-drain low while the port is powered (PSE_ON).
+  const qx = px + 250, qy = py + 10;
+  part("U22", LTC4279.libId, "LTC4279", qx, qy);
+  label("U22", "1", "PSE_MID");
+  nc("U22", "2");
+  nc("U22", "3");
+  label("U22", "4", "GND"); // Kelvin: route to the R72 ground pad, not the plane
+  label("U22", "5", "PSE_SENSE");
+  label("U22", "6", "PSE_GATE_DRV");
+  label("U22", "7", "PORT_N");
+  label("U22", "8", "PSE_AGND");
+  label("U22", "9", "PSE_ON");
+  label("U22", "10", "GND");
+  nc("U22", "11");
+  label("U22", "12", "PSE_PWRMODE");
+  label("U22", "13", "PSE_LEGACY");
+  label("U22", "14", "PSE_DUALPD");
+  nc("U22", "15");
+  label("U22", "16", "PSE_RESET");
+  r("R70", "10R", qx - 40, qy - 30, "PORT_P", "PSE_AGND");
+  c("C70", "1u/100V", qx - 40, qy - 18, "PSE_AGND", "GND", FP.c1210);
+  part("D70", "Device:D", "SMAJ58A TVS", qx - 40, qy - 6, FP.sma);
+  label("D70", "1", "PSE_AGND");
+  label("D70", "2", "GND");
+  part("D71", "Device:D", "S1B clamp", qx - 40, qy + 6, FP.sma);
+  label("D71", "2", "PORT_N");
+  label("D71", "1", "PSE_AGND");
+  c("C71", "220n/100V", qx - 40, qy + 18, "PORT_N", "PSE_AGND", FP.c1210);
+  r("R71", "200R", qx - 40, qy + 30, "PSE_GATE_DRV", "PSE_GATE");
+  part("Q22", PSMN075.libId, "PSMN075-100MSEX", qx - 40, qy + 50);
+  label("Q22", "1", "PSE_SENSE");
+  label("Q22", "2", "PSE_SENSE");
+  label("Q22", "3", "PSE_SENSE");
+  label("Q22", "4", "PSE_GATE");
+  label("Q22", "5", "PORT_N");
+  r("R72", "0.1R 1% 2W", qx, qy + 50, "PSE_SENSE", "GND", FP.r2512);
+  r("R73", "3.32k 1%", qx + 40, qy - 30, "PSE_PWRMODE", "GND");
+  r("R74", "100R", qx + 40, qy - 18, "PSE_MID", "GND");
+  r("R75", "100R", qx + 40, qy - 6, "PSE_LEGACY", "GND");
+  r("R76", "100R", qx + 40, qy + 6, "PSE_DUALPD", "GND");
+  r("R77", "100R", qx + 40, qy + 18, "PSE_EN", "PSE_RESET");
+  r("R78", "10k", qx + 40, qy + 30, "PSE_RESET", "GND");
+  r("R79", "10k", qx + 40, qy + 42, "+3V3", "PSE_ON");
+
   // Port protection and the two jacks. J5 is the radio, J6 the laptop; only the
   // data pairs pass through, so the laptop never sees DC and links at 100 Mbps.
   const jx = px + 160, jy = ey + 60;
@@ -530,7 +627,7 @@ export function buildRadioKiosk(): Schematic {
   const notes: [string, number][] = [
     ["STAGES 1+2 OF 4: power tree and radio port. Stage 3 = MCU, LEDs, fan, sensors. Stage 4 = board, keeping v1's port positions, cells on the bottom side.", 560],
     ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
-    ["PSE PENDING: the 802.3at controller (LTC4263-1 or LTC4279 class, autonomous single port, switch in the return lead) is not placed yet because its datasheet could not be fetched from this box. Its interface on this sheet: AGND = +54V, VEE = GND, OUT = PORT_N, plus a shutdown and a status line to J4.", 665],
+    ["PSE: LTC4279 (SO-16) per datasheet Figure 13. PORT_P is its AGND supply through R70 10R; board GND is its VEE; Q22 (PSMN075-100MSEX, ADI's recommended FET) switches PORT_N through R72 0.1R. PWRMODE 3.32k = Type 2, 25.5 W. RESET pulled down: port off until the MCU raises PSE_EN. PSE_ON is low while powered. VSSK and R72's ground end must be one Kelvin trace.", 665],
     ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the 18.5 V one runs in dropout on a 20 V brick and passes ~19 V through, which a laptop accepts.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
@@ -577,6 +674,10 @@ export function buildRadioKiosk(): Schematic {
     J1: "C20079", // XH-2A
     J2: "C22359705", J3: "C22359705", // PJ-002BH
     J5: "C385834", J6: "C385834", // R-RJ45R08P-A004
+    U22: "C687935", // LTC4279IS#PBF (10 in stock at JLC, buy the rest at DigiKey)
+    Q22: "C478016", // PSMN075-100MSEX
+    R72: "C844904", // WSL2512R1000FEA
+    D70: "C10762", D71: "C96324", // SMAJ58A, S1B
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
   for (const [ref, code] of Object.entries(lcsc)) {
