@@ -446,7 +446,7 @@ export function buildRadioKiosk(): Schematic {
   part("J1", "Connector:Conn_01x02", "USB-C PD trigger 20V", 30, 40, FP.xh2);
   label("J1", "1", "VIN_USB");
   label("J1", "2", "GND");
-  part("J2", BARREL.libId, "DC in 18-26V, PJ-002AH 5.5x2.1", 30, 90);
+  part("J2", BARREL.libId, "DC in 18-26V, PJ-002BH 5.5x2.5", 30, 90);
   label("J2", "1", "VIN_DC");
   label("J2", "2", "GND");
   nc("J2", "3");
@@ -801,7 +801,7 @@ export function buildRadioKiosk(): Schematic {
     ["STAGES 1-3 DONE: power tree, radio port, MCU. Stage 4 = the board. Port placement for the board: TOP edge = laptop side (J6 RJ45 laptop, J3 laptop DC out, the USB-C serial). RIGHT edge = power in (J1 PD trigger module, J2 DC jack). BOTTOM edge = radio (J5 RJ45 radio). D30 sits by the power inputs, D31 by the radio jack. Cells on the bottom side.", 560],
     ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
     ["PSE: LTC4279 (SO-16) per datasheet Figure 13. PORT_P is its AGND supply through R70 10R; board GND is its VEE; Q22 (PSMN075-100MSEX, ADI's recommended FET) switches PORT_N through R72 0.1R. PWRMODE 3.32k = Type 2, 25.5 W. RESET pulled down: port off until the MCU raises PSE_EN. PSE_ON is low while powered. VSSK and R72's ground end must be one Kelvin trace.", 665],
-    ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. J2 is 5.5x2.1 and J3 5.5x2.5 so the laptop plug cannot enter the input. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
+    ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the 18.5 V one runs in dropout on a 20 V brick and passes ~19 V through, which a laptop accepts.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
@@ -846,7 +846,7 @@ export function buildRadioKiosk(): Schematic {
     C22: "C53084452", // 10u/25V -> same 50V part
     C23: "C337978", C24: "C337978", // 4.7u/100V 1210
     J1: "C20079", // XH-2A
-    J2: "C2961147", J3: "C22359705", // PJ-002AH 5.5x2.1 in, PJ-002BH 5.5x2.5 laptop out
+    J2: "C22359705", J3: "C22359705", // PJ-002BH 5.5x2.5, same jack both ends so the laptop brick can feed the box
     J5: "C385834", J6: "C385834", // R-RJ45R08P-A004
     U22: "C687935", // LTC4279IS#PBF (10 in stock at JLC, buy the rest at DigiKey)
     Q22: "C478016", // PSMN075-100MSEX
