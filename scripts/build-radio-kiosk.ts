@@ -53,9 +53,9 @@ const FP = {
   lfpak33: "Package_TO_SOT_SMD:LFPAK33",
   cElec8: "Capacitor_SMD:CP_Elec_8x10.5",
   fuse1206: "Fuse:Fuse_1206_3216Metric",
-  xh2: "Connector_JST:JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical",
-  barrel: "Connector_BarrelJack:BarrelJack_Horizontal",
-  cr123a: "Battery:BatteryHolder_Bulgin_BX0123_1xCR123",
+  xh2: "LCSC:CONN-TH_XH-2A", // LCSC footprints imported with easyeda2kicad into data/footprints
+  barrel: "LCSC:DC-IN-TH_PJ-002BH",
+  cr123a: "LCSC:BAT-TH_BH-123A-A5BJ002",
 };
 
 // #region parts declared from their datasheets
@@ -137,7 +137,7 @@ const CR123A: IcSymbolSpec = {
   libId: "Device:Battery_CR123A",
   refPrefix: "BT",
   value: "CR123A",
-  description: "One CR123A lithium primary cell in a PCB holder (BH-123A-A1CJ002 at LCSC; Bulgin BX0123 footprint stands in until stage 4 imports the LCSC one). Four in series make the 12 V backup pack. Replace all four together.",
+  description: "One CR123A lithium primary cell in a BH-123A PCB holder (LCSC C5290177, footprint from LCSC via easyeda2kicad; pad 1/2 polarity to be confirmed on the physical part). Four in series make the 12 V backup pack. Replace all four together.",
   keywords: "battery cell cr123a lithium primary holder",
   footprint: FP.cr123a,
   pins: [
@@ -150,7 +150,7 @@ const BARREL: IcSymbolSpec = {
   libId: "Connector:Barrel_Jack",
   refPrefix: "J",
   value: "Barrel jack",
-  description: "DC barrel jack, centre positive. Pin 3 is the normally-closed switch contact and is left open.",
+  description: "DC barrel jack 5.5x2.5, CUI PJ-002BH (LCSC C22359705, footprint from LCSC), centre positive. Pin 1 centre pin, 2 sleeve, 3 the normally-closed switch contact, left open.",
   keywords: "dc jack barrel power connector",
   footprint: FP.barrel,
   pins: [
@@ -229,9 +229,9 @@ const RJ45: IcSymbolSpec = {
   libId: "Connector:RJ45_8P8C",
   refPrefix: "J",
   value: "RJ45 8P8C",
-  description: "Plain 8P8C jack, no magnetics: Ckmtw R-RJ45R08P-A004, the part v1 used (LCSC C385834). Amphenol footprint stands in until stage 4 imports the LCSC one. Pins 1/2/3/6 are the 100BASE-TX pairs; 4/5 and 7/8 carry PoE Mode B.",
+  description: "Plain 8P8C jack, no magnetics: Ckmtw R-RJ45R08P-A004, the part v1 used (LCSC C385834, footprint from LCSC). Pins 1/2/3/6 are the 100BASE-TX pairs; 4/5 and 7/8 carry PoE Mode B.",
   keywords: "rj45 8p8c ethernet jack",
-  footprint: "Connector_RJ:RJ45_Amphenol_54602-x08_Horizontal",
+  footprint: "LCSC:RJ45-TH_R-RJ45R08P-A004",
   pins: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ number: String(n), name: String(n), type: "passive" as const, side: "left" as const })),
 };
 
@@ -802,6 +802,7 @@ export function buildRadioKiosk(): Schematic {
     "21": "BK_KILL", // PB10
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
     "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
+    "42": "UART_TX", "43": "UART_RX", // PB6/PB7 USART1
   };
   for (const [pin, net] of Object.entries(mcuPins)) label("U40", pin, net);
   // Power pins per the datasheet power supply scheme: 100n at each VDD plus
@@ -828,6 +829,13 @@ export function buildRadioKiosk(): Schematic {
   label("J9", "2", "SWCLK");
   label("J9", "3", "+3V3");
   label("J9", "4", "GND");
+  // Direct serial to the MCU, USART1 on PB6/PB7, for a bench console that
+  // does not depend on the USB stack being alive.
+  part("J11", SWD_HDR.libId, "UART", mx - 60, my + 80);
+  label("J11", "1", "UART_TX");
+  label("J11", "2", "UART_RX");
+  label("J11", "3", "+3V3");
+  label("J11", "4", "GND");
   ops.push({ op: "instantiate_module", moduleId: "usb_c_program", params: { vbus_net: "USB_VBUS" }, at: { x: mx + 200, y: my - 60 } });
   r("R26", "100k", mx - 100, my - 40, "+3V3", "BOOST_SD");
   r("R100", "100k", mx - 100, my - 28, "TEST_LOAD", "GND");
@@ -893,7 +901,7 @@ export function buildRadioKiosk(): Schematic {
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN) and constant-current limited (LAPTOP_ILIM): firmware sets the limit to allocation minus the box draw so a shared charger never trips; what the Toughbook does when limited is untested (bench supply 15.6 V / 2.5 A). USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
