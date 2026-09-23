@@ -300,6 +300,10 @@ if (project) {
   for (const [id, fp] of Object.entries(footprints)) {
     if (!fp.raw) continue;
     const r = structuredClone(fp.raw) as any;
+    // easyeda2kicad writes the KiCad 5 "module" form; a KiCad 9 board wants
+    // "footprint" and has no use for tedit.
+    if (r.items?.[0]?.value === "module") r.items[0] = { kind: "atom", value: "footprint" };
+    r.items = (r.items ?? []).filter((it: any) => !(it.kind === "list" && it.items?.[0]?.value === "tedit"));
     const yAbove = +(fp.bbox.min.y - 0.9).toFixed(2);
     const atNode = { kind: "list", items: [{ kind: "atom", value: "at" }, { kind: "atom", value: "0" }, { kind: "atom", value: String(yAbove) }] };
     for (const it of r.items ?? []) {
