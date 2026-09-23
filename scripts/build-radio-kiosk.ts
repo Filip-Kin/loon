@@ -1,13 +1,16 @@
-// FRC radio kiosk v2, stage one: the power tree.
+// FRC radio kiosk v2, stages one and two: the power tree and the radio port.
 //
 // What this sheet does: take 18-26 V from either a USB-C PD trigger module or a
 // DC barrel jack, OR them together, make a 12 V rail that a 4x CR123A pack
 // steps in behind when the input drops, plus an 18.5 V laptop rail off the raw
 // input (so it sheds itself on a dropout) and 5 V / 3.3 V for the logic.
 //
-// What it does not do yet: the radio port (802.3at PSE + passive 12 V, stage
-// two), the MCU and its sensors/LEDs/fan (stage three), the board (stage four).
-// Every net the later stages need is a named label on this sheet.
+// Stage two adds the radio port: a 54 V boost for 802.3at, a TPS26600 eFuse for
+// passive 12 V, a return switch, TVS and the two RJ45s with the data pairs
+// passed straight through to the laptop. The PSE controller itself is not
+// placed yet (its ADI datasheet could not be fetched from this box).
+// Not done: the MCU and its sensors/LEDs/fan (stage three), the board (stage
+// four). Every net the later stages need is a named label on this sheet.
 //
 // Built for hand assembly of 2-4 boards on an OSH Park 2-layer run: SOIC,
 // SOT-23, 0805 and up, nothing with a hidden pad except the three HSOIC-8
@@ -154,20 +157,95 @@ const BARREL: IcSymbolSpec = {
   ],
 };
 
-const MCU_STUB: IcSymbolSpec = {
-  libId: "Connector:Conn_01x06",
+const LM3478: IcSymbolSpec = {
+  libId: "Regulator_Switching:LM3478",
+  refPrefix: "U",
+  value: "LM3478MA",
+  description:
+    "Low-side N-FET boost controller, SOIC-8, 2.97-40 V in. Makes the 54 V PSE rail from the backed-up 12 V. Peak current mode; RSEN sets the switch current limit, RFA the frequency (40 k = 400 kHz), FA/SD pulled above 1.35 V shuts it down.",
+  keywords: "boost controller step-up low-side n-fet",
+  datasheet: "https://www.ti.com/lit/ds/symlink/lm3478.pdf",
+  footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+  pins: [
+    { number: "1", name: "ISEN", type: "input", side: "left" },
+    { number: "2", name: "COMP", type: "passive", side: "left" },
+    { number: "3", name: "FB", type: "input", side: "left" },
+    { number: "4", name: "AGND", type: "power_in", side: "left" },
+    { number: "5", name: "PGND", type: "power_in", side: "right" },
+    { number: "6", name: "DR", type: "output", side: "right" },
+    { number: "7", name: "FA/SD", type: "input", side: "right" },
+    { number: "8", name: "VIN", type: "power_in", side: "right" },
+  ],
+};
+
+const TPS26600: IcSymbolSpec = {
+  libId: "Power_Protection:TPS26600",
+  refPrefix: "U",
+  value: "TPS26600PWP",
+  description:
+    "60 V 2.2 A eFuse with back-to-back FETs: reverse current blocking, resistor-set current limit, analog current monitor (78 uA/A on IMON), SHDN, open-drain FLT. HTSSOP-16, pad to RTN. Gates the passive 12 V onto the radio port and is the backfeed detector.",
+  keywords: "efuse hot swap reverse blocking current limit monitor",
+  datasheet: "https://www.ti.com/lit/ds/symlink/tps2660.pdf",
+  footprint: "Package_SO:HTSSOP-16-1EP_4.4x5mm_P0.65mm_EP3.4x5mm",
+  pins: [
+    { number: "1", name: "IN", type: "power_in", side: "left" },
+    { number: "2", name: "IN", type: "power_in", side: "left" },
+    { number: "3", name: "UVLO", type: "input", side: "left" },
+    { number: "4", name: "NC", type: "no_connect", side: "left" },
+    { number: "5", name: "OVP", type: "input", side: "left" },
+    { number: "6", name: "MODE", type: "input", side: "left" },
+    { number: "7", name: "SHDN", type: "input", side: "left" },
+    { number: "8", name: "RTN", type: "power_in", side: "left" },
+    { number: "9", name: "GND", type: "power_in", side: "right" },
+    { number: "10", name: "IMON", type: "output", side: "right" },
+    { number: "11", name: "ILIM", type: "passive", side: "right" },
+    { number: "12", name: "dVdT", type: "passive", side: "right" },
+    { number: "13", name: "NC", type: "no_connect", side: "right" },
+    { number: "14", name: "FLT", type: "open_collector", side: "right" },
+    { number: "15", name: "OUT", type: "power_out", side: "right" },
+    { number: "16", name: "OUT", type: "power_out", side: "right" },
+    { number: "17", name: "PAD", type: "power_in", side: "right" },
+  ],
+};
+
+const NMOS_100V: IcSymbolSpec = {
+  libId: "Transistor_FET:Power_NMOS_100V",
+  refPrefix: "Q",
+  value: "N-MOSFET 100V (SQ4850EY)",
+  description: "100 V N-channel power MOSFET, SOIC-8. The boost switch for the 54 V rail: 60 V is too close to a 54 V output plus ringing.",
+  keywords: "mosfet n-channel power 100v",
+  footprint: FP.soic8ep,
+  pins: [
+    { number: "1", name: "G", type: "input", side: "left" },
+    { number: "2", name: "S", type: "passive", side: "left" },
+    { number: "3", name: "D", type: "passive", side: "right" },
+  ],
+};
+
+const RJ45: IcSymbolSpec = {
+  libId: "Connector:RJ45_8P8C",
   refPrefix: "J",
-  value: "Conn_01x06",
-  description: "Six-pin 2.54 mm header.",
+  value: "RJ45 8P8C",
+  description: "Plain 8P8C jack, no magnetics (Amphenol 54602-908 class, the same footprint class as v1's Ckmtw part). Pins 1/2/3/6 are the 100BASE-TX pairs; 4/5 and 7/8 carry PoE Mode B.",
+  keywords: "rj45 8p8c ethernet jack",
+  footprint: "Connector_RJ:RJ45_Amphenol_54602-x08_Horizontal",
+  pins: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ number: String(n), name: String(n), type: "passive" as const, side: "left" as const })),
+};
+
+const MCU_STUB: IcSymbolSpec = {
+  libId: "Connector:Conn_01x10",
+  refPrefix: "J",
+  value: "Conn_01x10",
+  description: "Ten-pin 2.54 mm header.",
   keywords: "connector header",
-  footprint: "Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical",
-  pins: [1, 2, 3, 4, 5, 6].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
+  footprint: "Connector_PinHeader_2.54mm:PinHeader_1x10_P2.54mm_Vertical",
+  pins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
 };
 
 // #region sheet
 export function buildRadioKiosk(): Schematic {
   const schem = emptySchematic(crypto.randomUUID());
-  schem.title = "FRC Radio Kiosk v2 - power tree (stage 1)";
+  schem.title = "FRC Radio Kiosk v2 - power tree + radio port (stages 1-2)";
   schem.rev = "A";
   schem.company = "Filip Kin";
 
@@ -178,7 +256,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, MCU_STUB]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, MCU_STUB]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -329,11 +407,123 @@ export function buildRadioKiosk(): Schematic {
   // The signals stage 3 picks up. A header on this sheet so every net has two
   // ends now; it becomes labels into the MCU block when that stage lands.
   part("J4", MCU_STUB.libId, "to MCU (stage 3)", bx + 380, by);
-  for (const [pin, net] of [["1", "VIN_SENSE"], ["2", "PACK_SENSE"], ["3", "TEST_LOAD"], ["4", "BK_ON"], ["5", "+3V3"], ["6", "GND"]] as const) label("J4", pin, net);
+  for (const [pin, net] of [
+    ["1", "VIN_SENSE"], ["2", "PACK_SENSE"], ["3", "TEST_LOAD"], ["4", "BK_ON"],
+    ["5", "BOOST_SD"], ["6", "PASSIVE_EN"], ["7", "PASSIVE_IMON"], ["8", "PASSIVE_FLT"],
+    ["9", "+3V3"], ["10", "GND"],
+  ] as const) label("J4", pin, net);
+
+  // #region stage 2: radio port
+  // Both PoE flavours share the port pins: + on 4/5, - on 7/8 (802.3 Mode B,
+  // same polarity v1 used). Active: the 54 V rail sits on PORT_P and the PSE
+  // switches PORT_N to ground. Passive: the eFuse puts 12 V on PORT_P and Q13
+  // ties PORT_N to ground. Never both: firmware holds BOOST_SD high whenever
+  // PASSIVE_EN is high. The eFuse's back-to-back FETs block 54 V from reaching
+  // the 12 V rail, and the boost diode blocks 12 V from reaching the boost.
+  const px = 560, py = 40;
+
+  // 12 V -> 54 V boost, LM3478 at 400 kHz. Sized for the radio (10-15 W), not a
+  // full 30 W class-4 load: at D = 0.78 the LM3478 has ~84 mV of sense headroom,
+  // and 20 mR puts the peak switch limit near 4 A.
+  part("U20", LM3478.libId, "LM3478 54V boost", px, py);
+  part("Q20", NMOS_100V.libId, "N-MOSFET 100V", px + 50, py - 20);
+  part("L20", "Device:L", "33u 4A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H6mm");
+  part("D20", "Device:D", "B3100 100V Schottky", px + 70, py - 40, FP.sma);
+  r("R20", "20m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
+  r("R21", "40.2k", px - 30, py + 14, "BOOST_FA", "GND");
+  r("R22", "402k", px + 100, py - 10, "+54V", "BOOST_FB");
+  r("R23", "9.53k", px + 100, py + 2, "BOOST_FB", "GND");
+  c("C20", "100p", px + 110, py + 2, "BOOST_FB", "GND");
+  r("R24", "10k", px - 30, py - 10, "BOOST_COMP", "BOOST_COMPC");
+  c("C21", "47n", px - 30, py + 2, "BOOST_COMPC", "GND");
+  c("C22", "10u/25V", px - 30, py - 30, "+12V", "GND", FP.c1210);
+  c("C23", "4.7u/100V", px + 100, py - 30, "+54V", "GND", FP.c1210);
+  c("C24", "4.7u/100V", px + 108, py - 30, "+54V", "GND", FP.c1210);
+  part("C25", "Device:C_Polarized", "47u/63V", px + 120, py - 30, FP.cRadial10);
+  label("C25", "1", "+54V");
+  label("C25", "2", "GND");
+  // Shutdown from the MCU through a diode so R21 alone still sets the frequency.
+  r("R25", "1k", px - 50, py + 26, "BOOST_SD", "BOOST_SDD");
+  part("D21", "Device:D", "1N4148W", px - 40, py + 26);
+  label("D21", "2", "BOOST_SDD");
+  label("D21", "1", "BOOST_FA");
+  label("U20", "1", "BOOST_CS");
+  label("U20", "2", "BOOST_COMP");
+  label("U20", "3", "BOOST_FB");
+  label("U20", "4", "GND");
+  label("U20", "5", "GND");
+  label("U20", "6", "BOOST_DR");
+  label("U20", "7", "BOOST_FA");
+  label("U20", "8", "+12V");
+  label("Q20", "1", "BOOST_DR");
+  label("Q20", "2", "BOOST_CS");
+  label("Q20", "3", "BOOST_SW");
+  label("L20", "1", "+12V");
+  label("L20", "2", "BOOST_SW");
+  label("D20", "2", "BOOST_SW");
+  label("D20", "1", "+54V");
+
+  // Passive path: TPS26600 eFuse. ILIM 8.06k = 1.5 A (R = 12k / I). IMON into
+  // 10k gives 0.78 V per amp on PASSIVE_IMON, so 1.5 A reads 1.17 V at the ADC.
+  // A robot backfeeding through the radio's raw leads shows up here as current
+  // the radio alone would never draw. SHDN low = off, so the port is dead until
+  // firmware asks for passive.
+  const ex = px, ey = py + 90;
+  part("U21", TPS26600.libId, "TPS26600 eFuse", ex, ey);
+  label("U21", "1", "+12V");
+  label("U21", "2", "+12V");
+  label("U21", "3", "GND"); // UVLO default
+  nc("U21", "4");
+  label("U21", "5", "GND"); // OVP default
+  nc("U21", "6"); // MODE open = auto-retry
+  label("U21", "7", "PASSIVE_EN");
+  label("U21", "8", "GND");
+  label("U21", "9", "GND");
+  label("U21", "10", "PASSIVE_IMON");
+  label("U21", "11", "PASSIVE_ILIM");
+  label("U21", "12", "PASSIVE_DVDT");
+  nc("U21", "13");
+  label("U21", "14", "PASSIVE_FLT");
+  label("U21", "15", "PORT_P");
+  label("U21", "16", "PORT_P");
+  label("U21", "17", "GND");
+  r("R60", "8.06k", ex + 50, ey - 10, "PASSIVE_ILIM", "GND");
+  r("R61", "10k", ex + 50, ey + 2, "PASSIVE_IMON", "GND");
+  c("C60", "10n", ex + 50, ey + 14, "PASSIVE_DVDT", "GND");
+  r("R62", "10k", ex + 50, ey + 26, "+3V3", "PASSIVE_FLT");
+  r("R63", "100k", ex - 30, ey + 20, "PASSIVE_EN", "GND");
+  c("C61", "1u/50V", ex - 30, ey - 10, "+12V", "GND", FP.c1206);
+  c("C62", "1u/100V", ex + 70, ey - 10, "PORT_P", "GND", FP.c1210);
+  // Passive return: ties PORT_N to ground while PASSIVE_EN is high. Off in
+  // active mode so the PSE's own switch owns the return.
+  part("Q13", "Transistor_FET:Power_NMOS_60V", "N-MOSFET 60V logic-level", ex + 100, ey + 10, FP.soic8ep);
+  label("Q13", "1", "PASSIVE_EN");
+  label("Q13", "2", "GND");
+  label("Q13", "3", "PORT_N");
+
+  // Port protection and the two jacks. J5 is the radio, J6 the laptop; only the
+  // data pairs pass through, so the laptop never sees DC and links at 100 Mbps.
+  const jx = px + 160, jy = ey + 60;
+  part("D22", "Device:D", "SMAJ58A TVS", jx - 30, jy - 30, FP.sma);
+  label("D22", "1", "PORT_P");
+  label("D22", "2", "PORT_N");
+  part("J5", RJ45.libId, "RJ45 radio", jx, jy);
+  part("J6", RJ45.libId, "RJ45 laptop", jx + 60, jy);
+  for (const p of ["1", "2", "3", "6"]) {
+    label("J5", p, `ETH_${p}`);
+    label("J6", p, `ETH_${p}`);
+  }
+  label("J5", "4", "PORT_P");
+  label("J5", "5", "PORT_P");
+  label("J5", "7", "PORT_N");
+  label("J5", "8", "PORT_N");
+  for (const p of ["4", "5", "7", "8"]) nc("J6", p);
 
   // #region notes
   const notes: [string, number][] = [
-    ["STAGE 1 OF 4: power tree. Stage 2 = radio port (802.3at PSE + passive 12 V on the same pins, eFuse, RJ45 pass-through). Stage 3 = MCU, LEDs, fan, sensors. Stage 4 = board, keeping v1's port positions, cells on the bottom side.", 560],
+    ["STAGES 1+2 OF 4: power tree and radio port. Stage 3 = MCU, LEDs, fan, sensors. Stage 4 = board, keeping v1's port positions, cells on the bottom side.", 560],
+    ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
+    ["PSE PENDING: the 802.3at controller (LTC4263-1 or LTC4279 class, autonomous single port, switch in the return lead) is not placed yet because its datasheet could not be fetched from this box. Its interface on this sheet: AGND = +54V, VEE = GND, OUT = PORT_N, plus a shutdown and a status line to J4.", 665],
     ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the 18.5 V one runs in dropout on a 20 V brick and passes ~19 V through, which a laptop accepts.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
