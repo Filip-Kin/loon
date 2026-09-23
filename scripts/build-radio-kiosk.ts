@@ -319,6 +319,23 @@ const SWD_HDR: IcSymbolSpec = {
   pins: [1, 2, 3, 4].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
 };
 
+const INA180: IcSymbolSpec = {
+  libId: "Amplifier_Current:INA180A1",
+  refPrefix: "U",
+  value: "INA180A1IDBVR",
+  description: "High-side current-sense amplifier, gain 20, 26 V common mode, SOT-23-5 (pinout A). Measures the USB-C input current.",
+  keywords: "current sense amplifier high side",
+  datasheet: "https://www.ti.com/lit/ds/symlink/ina180.pdf",
+  footprint: FP.sot23_5,
+  pins: [
+    { number: "1", name: "OUT", type: "output", side: "right" },
+    { number: "2", name: "GND", type: "power_in", side: "left" },
+    { number: "3", name: "IN+", type: "input", side: "left" },
+    { number: "4", name: "IN-", type: "input", side: "left" },
+    { number: "5", name: "VS", type: "power_in", side: "right" },
+  ],
+};
+
 const AHCT1G125: IcSymbolSpec = {
   libId: "Logic_LevelTranslator:SN74AHCT1G125",
   refPrefix: "U",
@@ -378,7 +395,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -417,7 +434,7 @@ export function buildRadioKiosk(): Schematic {
   // 12 V and 5 V; the 15.6 V row is derived (RFBB = 100k / (Vout - 1)).
   // One 10 uH XAL7030 for all three: the 12 V row asks for 15 uH, which only
   // buys lower ripple at loads this board never reaches.
-  const buck = (n: number, vout: number, rfbb: string, coutV: string, vinNet: string, voutNet: string, x: number, y: number) => {
+  const buck = (n: number, vout: number, rfbb: string, coutV: string, vinNet: string, voutNet: string, x: number, y: number, enNet?: string) => {
     const u = `U${n}`;
     const L = (s: string) => `${u}_${s}`;
     part(u, LMR33630.libId, `LMR33630 ${vout}V`, x, y);
@@ -433,7 +450,7 @@ export function buildRadioKiosk(): Schematic {
     r(`R${n}1`, rfbb, x + 48, y + 34, L("FB"), "GND");
     label(u, "1", "GND");
     label(u, "2", vinNet);
-    label(u, "3", vinNet); // EN straight to VIN: the rail is on whenever its input is
+    label(u, "3", enNet ?? vinNet); // EN to VIN = on whenever its input is; or to an MCU line
     nc(u, "4"); // PG unused
     label(u, "5", L("FB"));
     label(u, "6", L("VCC"));
@@ -456,7 +473,21 @@ export function buildRadioKiosk(): Schematic {
   part("D2", "Device:D", "SMAJ28A TVS", 60, 90, FP.sma);
   label("D2", "1", "VIN_DC");
   label("D2", "2", "GND");
-  idealDiode(1, "VIN_USB", "VIN", 100, 40);
+  // USB input current: 20 mR shunt, INA180A1 (x20) -> 2 V at 5 A on USB_ISENSE.
+  // What the box draws from a shared GaN charger, so firmware can keep it
+  // inside the port's allocation.
+  r("R93", "20m 1W", 80, 52, "VIN_USB", "VIN_USBS", FP.r2512);
+  part("U41", INA180.libId, "INA180A1", 80, 66);
+  label("U41", "1", "USB_ISENSE");
+  label("U41", "2", "GND");
+  label("U41", "3", "VIN_USB");
+  label("U41", "4", "VIN_USBS");
+  label("U41", "5", "+3V3");
+  c("C115", "100n", 96, 66, "+3V3", "GND");
+  // Which input is live: a divider on the DC jack side, same ratio as VIN_SENSE.
+  r("R94", "100k", 80, 110, "VIN_DC", "DCIN_SENSE");
+  r("R95", "14.0k", 80, 122, "DCIN_SENSE", "GND");
+  idealDiode(1, "VIN_USBS", "VIN", 100, 40);
   idealDiode(2, "VIN_DC", "VIN", 100, 90);
   c("C90", "22u/50V", 180, 60, "VIN", "GND", FP.c1210);
   c("C91", "22u/50V", 188, 60, "VIN", "GND", FP.c1210);
@@ -469,7 +500,10 @@ export function buildRadioKiosk(): Schematic {
   // #region rails
   buck(3, 12, "9.09k", "25V", "VIN", "+12V_BUCK", 80, 170);
   idealDiode(6, "+12V_BUCK", "+12V", 230, 170); // blocks the pack from pushing into a dead buck
-  buck(4, 15.6, "6.81k", "25V", "VIN", "+15V6_BUCK", 80, 260);
+  buck(4, 15.6, "6.81k", "25V", "VIN", "+15V6_BUCK", 80, 260, "LAPTOP_EN");
+  // Laptop rail under firmware control, off at reset. On a shared USB-C port
+  // the laptop's charge demand can exceed the allocation; firmware decides.
+  r("R92", "100k", 80, 300, "LAPTOP_EN", "GND");
   idealDiode(7, "+15V6_BUCK", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
   part("J3", BARREL.libId, "Laptop out 15.6V, PJ-002BH 5.5x2.5 (v1 jack)", 300, 260);
   label("J3", "1", "LAPTOP_OUT");
@@ -711,6 +745,8 @@ export function buildRadioKiosk(): Schematic {
     "1": "+3V3", "8": "GND", "9": "MCU_VDDA", "23": "GND", "35": "GND", "47": "GND", "24": "+3V3", "36": "+3V3", "48": "+3V3",
     "7": "MCU_NRST", "44": "MCU_BOOT0",
     "10": "VIN_SENSE", "11": "PACK_SENSE", "12": "PASSIVE_IMON", "13": "TEMP_SENSE", "14": "FAN_SENSE", // ADC0-4
+    "15": "USB_ISENSE", "17": "DCIN_SENSE", // ADC5, ADC7
+    "18": "LAPTOP_EN", // PB0
     "25": "TEST_LOAD", "26": "BOOST_SD", "27": "PASSIVE_EN", "28": "PSE_EN", // PB12-15
     "16": "FAN_PWM", // PA6 TIM3_CH1
     "29": "LED_DATA", // PA8 TIM1_CH1 (PWM+DMA for the WS2812 stream)
@@ -807,8 +843,8 @@ export function buildRadioKiosk(): Schematic {
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the laptop one is set to 15.6 V (the Toughbook brick voltage) and runs in dropout on that brick, passing ~15.3 V.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
-    ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. No laptop-rail enable (the laptop buck is only shed by Vin sagging); add a FET on its EN if firmware ever needs to shed it. USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. Out: PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN); firmware turns it on, and whether it stays on from a shared USB-C port depends on the Toughbook backing off on a weak source (untested: bench supply at 15.6 V / 2.5 A limit). USB serial is self-powered: no brick or battery, no console.", 635],
+    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE. Out: PB0 LAPTOP_EN (off at reset), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
@@ -862,6 +898,7 @@ export function buildRadioKiosk(): Schematic {
     J8: "C20079", // XH-2A
     RT1: "C13564", // NCP18XH103F03RB
     U40: "C80488", // STM32F072C8T6
+    U41: "C122228", // INA180A1IDBVR
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
   for (const [ref, code] of Object.entries(lcsc)) {
