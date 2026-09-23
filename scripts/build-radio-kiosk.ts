@@ -5,12 +5,13 @@
 // steps in behind when the input drops, plus an 18.5 V laptop rail off the raw
 // input (so it sheds itself on a dropout) and 5 V / 3.3 V for the logic.
 //
+// Stage three is the MCU (STM32F072, USB DFU, no radio), two WS2812B, the fan,
+// an NTC and the battery-kill FET.
 // Stage two adds the radio port: a 54 V boost for 802.3at, a TPS26600 eFuse for
 // passive 12 V, a return switch, TVS and the two RJ45s with the data pairs
 // passed straight through to the laptop. The PSE controller itself is not
 // placed yet (its ADI datasheet could not be fetched from this box).
-// Not done: the MCU and its sensors/LEDs/fan (stage three), the board (stage
-// four). Every net the later stages need is a named label on this sheet.
+// Not done: the board (stage four).
 //
 // All SMT except the connectors and the cell holders, so the same BOM goes to
 // an assembly house later without a part change. The first 2-4 are hand-built,
@@ -279,6 +280,45 @@ const PSMN075: IcSymbolSpec = {
   ],
 };
 
+// STM32F072C8T6, LQFP-48, pin numbers from DocID025004 Table 13 (LQFP48 column).
+// Crystal-less USB (HSI48) with the ROM DFU bootloader, so the USB-C serial
+// port is also the programmer: hold BOOT0 at reset and it enumerates as DFU.
+const STM32_PINS: { n: number; name: string; t?: IcSymbolSpec["pins"][number]["type"] }[] = [
+  { n: 1, name: "VBAT", t: "power_in" }, { n: 2, name: "PC13" }, { n: 3, name: "PC14/OSC32_IN" }, { n: 4, name: "PC15/OSC32_OUT" },
+  { n: 5, name: "PF0/OSC_IN" }, { n: 6, name: "PF1/OSC_OUT" }, { n: 7, name: "NRST", t: "input" }, { n: 8, name: "VSSA", t: "power_in" },
+  { n: 9, name: "VDDA", t: "power_in" }, { n: 10, name: "PA0/ADC0" }, { n: 11, name: "PA1/ADC1" }, { n: 12, name: "PA2/ADC2" },
+  { n: 13, name: "PA3/ADC3" }, { n: 14, name: "PA4/ADC4" }, { n: 15, name: "PA5/ADC5" }, { n: 16, name: "PA6/ADC6/TIM3_CH1" },
+  { n: 17, name: "PA7/ADC7" }, { n: 18, name: "PB0/ADC8" }, { n: 19, name: "PB1/ADC9" }, { n: 20, name: "PB2" },
+  { n: 21, name: "PB10" }, { n: 22, name: "PB11" }, { n: 23, name: "VSS", t: "power_in" }, { n: 24, name: "VDD", t: "power_in" },
+  { n: 25, name: "PB12" }, { n: 26, name: "PB13" }, { n: 27, name: "PB14" }, { n: 28, name: "PB15" },
+  { n: 29, name: "PA8/TIM1_CH1" }, { n: 30, name: "PA9" }, { n: 31, name: "PA10" }, { n: 32, name: "PA11/USB_DM" },
+  { n: 33, name: "PA12/USB_DP" }, { n: 34, name: "PA13/SWDIO" }, { n: 35, name: "VSS", t: "power_in" }, { n: 36, name: "VDDIO2", t: "power_in" },
+  { n: 37, name: "PA14/SWCLK" }, { n: 38, name: "PA15" }, { n: 39, name: "PB3" }, { n: 40, name: "PB4" },
+  { n: 41, name: "PB5" }, { n: 42, name: "PB6" }, { n: 43, name: "PB7" }, { n: 44, name: "BOOT0", t: "input" },
+  { n: 45, name: "PB8" }, { n: 46, name: "PB9" }, { n: 47, name: "VSS", t: "power_in" }, { n: 48, name: "VDD", t: "power_in" },
+];
+const STM32F072: IcSymbolSpec = {
+  libId: "MCU_ST_STM32F0:STM32F072C8T6",
+  refPrefix: "U",
+  value: "STM32F072C8T6",
+  description:
+    "STM32F072, Cortex-M0 48 MHz, 64 KB flash, LQFP-48. Crystal-less USB full-speed device with the ROM DFU bootloader, 12-bit ADC. No radio on the board.",
+  keywords: "stm32 mcu cortex-m0 usb dfu lqfp48",
+  datasheet: "https://www.st.com/resource/en/datasheet/stm32f072c8.pdf",
+  footprint: "Package_QFP:LQFP-48_7x7mm_P0.5mm",
+  pins: STM32_PINS.map((p, i) => ({ number: String(p.n), name: p.name, type: p.t ?? "bidirectional", side: i < 24 ? "left" : "right" })),
+};
+
+const SWD_HDR: IcSymbolSpec = {
+  libId: "Connector:Conn_01x04",
+  refPrefix: "J",
+  value: "SWD",
+  description: "Four-pin 2.54 mm header: SWDIO, SWCLK, 3V3, GND. Only needed if the DFU bootloader is ever lost.",
+  keywords: "connector header swd debug",
+  footprint: "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical",
+  pins: [1, 2, 3, 4].map((n) => ({ number: String(n), name: `Pin_${n}`, type: "passive" as const, side: "left" as const })),
+};
+
 const AHCT1G125: IcSymbolSpec = {
   libId: "Logic_LevelTranslator:SN74AHCT1G125",
   refPrefix: "U",
@@ -338,7 +378,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -658,14 +698,49 @@ export function buildRadioKiosk(): Schematic {
   for (const p of ["4", "5", "7", "8"]) nc("J6", p);
 
   // #region stage 3: MCU, LEDs, fan, temperature, USB serial
-  // ESP32-S3-WROOM-1 with its native USB on an outside-facing USB-C. The port
-  // is self-powered: USB VBUS goes nowhere but the ESD array, so a laptop can
+  // STM32F072C8T6 with its USB on an outside-facing USB-C. The port is
+  // self-powered: USB VBUS goes nowhere but the ESD array, so a laptop can
   // never back-drive the 5 V rail and the board must have its brick or its
-  // battery to talk. Every ADC input is on ADC1 (IO1-IO10); ADC2 dies when
-  // Wi-Fi is on. Outputs that matter at reset have a pull so a floating GPIO
-  // means "off": BOOST_SD up (boost off), TEST_LOAD / FAN / BK_KILL down.
+  // battery to talk. Outputs that matter at reset have a pull so a floating
+  // GPIO means "off": BOOST_SD up (boost off), TEST_LOAD / FAN / BK_KILL down.
   const mx = 560, my = 330;
-  ops.push({ op: "instantiate_module", moduleId: "esp32s3_core", at: { x: mx, y: my } });
+  part("U40", STM32F072.libId, "STM32F072C8T6", mx, my);
+  const mcuPins: Record<string, string> = {
+    "1": "+3V3", "8": "GND", "9": "MCU_VDDA", "23": "GND", "35": "GND", "47": "GND", "24": "+3V3", "36": "+3V3", "48": "+3V3",
+    "7": "MCU_NRST", "44": "MCU_BOOT0",
+    "10": "VIN_SENSE", "11": "PACK_SENSE", "12": "PASSIVE_IMON", "13": "TEMP_SENSE", "14": "FAN_SENSE", // ADC0-4
+    "25": "TEST_LOAD", "26": "BOOST_SD", "27": "PASSIVE_EN", "28": "PSE_EN", // PB12-15
+    "16": "FAN_PWM", // PA6 TIM3_CH1
+    "29": "LED_DATA", // PA8 TIM1_CH1 (PWM+DMA for the WS2812 stream)
+    "21": "BK_KILL", // PB10
+    "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
+    "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
+  };
+  for (const [pin, net] of Object.entries(mcuPins)) label("U40", pin, net);
+  // Power pins per the datasheet power supply scheme: 100n at each VDD plus
+  // 4.7u bulk, VDDA through a 10R/1u+10n filter, VBAT tied to 3V3 (no RTC).
+  c("C120", "4.7u", mx - 60, my - 40, "+3V3", "GND");
+  c("C121", "100n", mx - 52, my - 40, "+3V3", "GND");
+  c("C122", "100n", mx - 44, my - 40, "+3V3", "GND");
+  c("C123", "100n", mx - 36, my - 40, "+3V3", "GND");
+  r("R112", "10R", mx - 60, my - 24, "+3V3", "MCU_VDDA");
+  c("C124", "1u", mx - 52, my - 24, "MCU_VDDA", "GND");
+  c("C125", "10n", mx - 44, my - 24, "MCU_VDDA", "GND");
+  // Reset and boot. NRST has an internal pull-up; the 100n is the datasheet's
+  // noise filter. BOOT0 pulled down; holding SW2 at reset enters USB DFU.
+  part("SW1", "Switch:SW_Push", "RESET", mx - 60, my);
+  label("SW1", "1", "MCU_NRST");
+  label("SW1", "2", "GND");
+  c("C126", "100n", mx - 60, my + 14, "MCU_NRST", "GND");
+  part("SW2", "Switch:SW_Push", "BOOT0 (DFU)", mx - 60, my + 30);
+  label("SW2", "1", "MCU_BOOT0");
+  label("SW2", "2", "+3V3");
+  r("R111", "10k", mx - 60, my + 44, "MCU_BOOT0", "GND");
+  part("J9", SWD_HDR.libId, "SWD", mx - 60, my + 64);
+  label("J9", "1", "SWDIO");
+  label("J9", "2", "SWCLK");
+  label("J9", "3", "+3V3");
+  label("J9", "4", "GND");
   ops.push({ op: "instantiate_module", moduleId: "usb_c_program", params: { vbus_net: "USB_VBUS" }, at: { x: mx + 200, y: my - 60 } });
   r("R26", "100k", mx - 100, my - 40, "+3V3", "BOOST_SD");
   r("R100", "100k", mx - 100, my - 28, "TEST_LOAD", "GND");
@@ -731,7 +806,7 @@ export function buildRadioKiosk(): Schematic {
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: J3 must be a different barrel size than J2. Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. No laptop-rail enable (the laptop buck is only shed by Vin sagging); add a FET on its EN if firmware ever needs to shed it. USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: ESP32-S3-WROOM-1. ADC1: IO1 VIN_SENSE, IO2 PACK_SENSE, IO4 PASSIVE_IMON, IO5 TEMP_SENSE, IO6 FAN_SENSE. Out: IO8 TEST_LOAD, IO9 BOOST_SD (pulled up = off), IO10 PASSIVE_EN, IO11 PSE_EN, IO12 FAN_PWM, IO13 LED_DATA, IO14 BK_KILL. In: IO15 BK_ON, IO16 PASSIVE_FLT, IO17 PSE_ON. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. Out: PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
@@ -784,6 +859,7 @@ export function buildRadioKiosk(): Schematic {
     Q30: "C20917", // AO3400A (basic)
     J8: "C20079", // XH-2A
     RT1: "C13564", // NCP18XH103F03RB
+    U40: "C80488", // STM32F072C8T6
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
   for (const [ref, code] of Object.entries(lcsc)) {
@@ -808,37 +884,8 @@ export function buildRadioKiosk(): Schematic {
   const lateRes = applyOps(schem, late, resolve).results.filter((r) => !r.ok);
   if (lateRes.length) console.log("failed late ops:", [...new Set(lateRes.map((f) => f.error))].join("; "));
 
-  // #region MCU pin map
-  const mcu = schem.symbols.find((x) => x.libId === "RF_Module:ESP32-S3-WROOM-1");
-  const mcuDef = mcu ? defOf(mcu.libId) : undefined;
-  if (mcu && mcuDef) {
-    const assign: Record<string, string> = {
-      "39": "VIN_SENSE", // IO1  ADC1_0
-      "38": "PACK_SENSE", // IO2 ADC1_1
-      "4": "PASSIVE_IMON", // IO4 ADC1_3
-      "5": "TEMP_SENSE", // IO5 ADC1_4
-      "6": "FAN_SENSE", // IO6 ADC1_5
-      "12": "TEST_LOAD", // IO8
-      "17": "BOOST_SD", // IO9
-      "18": "PASSIVE_EN", // IO10
-      "19": "PSE_EN", // IO11
-      "20": "FAN_PWM", // IO12
-      "21": "LED_DATA", // IO13
-      "22": "BK_KILL", // IO14
-      "8": "BK_ON", // IO15 in
-      "9": "PASSIVE_FLT", // IO16 in
-      "10": "PSE_ON", // IO17 in
-    };
-    const mcuOps: Op[] = [];
-    for (const [pin, net] of Object.entries(assign)) {
-      const pd = mcuDef.pins.find((x) => x.number === pin);
-      if (pd) mcuOps.push({ op: "add_label", text: net, at: pinWorld(pd, mcu), kind: "local" });
-    }
-    applyOps(schem, mcuOps, resolve);
-  } else console.log("no ESP32 placed");
   // LCSC numbers for module-placed parts, found by symbol rather than ref.
   const byLib: Record<string, string> = {
-    "RF_Module:ESP32-S3-WROOM-1": "C2913198",
     "Connector:USB_C_Receptacle_USB2.0": "C5143397",
     "Power_Protection:USBLC6-2SC6": "C7519",
     "Regulator_Linear:AP2112K-3.3": "C51118",
