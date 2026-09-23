@@ -1,8 +1,8 @@
 // FRC radio kiosk v2, stages one and two: the power tree and the radio port.
 //
-// What this sheet does: take 18-26 V from either a USB-C PD trigger module or a
+// What this sheet does: take 14-26 V from either a USB-C PD trigger module or a
 // DC barrel jack, OR them together, make a 12 V rail that a 4x CR123A pack
-// steps in behind when the input drops, plus an 18.5 V laptop rail off the raw
+// steps in behind when the input drops, plus a 15.6 V laptop rail off the raw
 // input (so it sheds itself on a dropout) and 5 V / 3.3 V for the logic.
 //
 // Stage three is the MCU (STM32F072, USB DFU, no radio), two WS2812B, the fan,
@@ -85,7 +85,7 @@ const LMR33630: IcSymbolSpec = {
   refPrefix: "U",
   value: "LMR33630ADDA",
   description:
-    "36 V 3 A synchronous buck, 400 kHz, HSOIC-8. Used three times (12 V, 18.5 V, 5 V) so the BOM has one buck. Auto mode, so it skips pulses at very light load; the 12 V rail always carries the logic so it stays out of that region. If a rail whines, this is the part to swap.",
+    "36 V 3 A synchronous buck, 400 kHz, HSOIC-8. Used three times (12 V, 15.6 V, 5 V) so the BOM has one buck. Auto mode, so it skips pulses at very light load; the 12 V rail always carries the logic so it stays out of that region. If a rail whines, this is the part to swap.",
   keywords: "buck synchronous step-down 36v 3a",
   datasheet: "https://www.ti.com/lit/ds/symlink/lmr33630.pdf",
   footprint: FP.hsoic8,
@@ -414,7 +414,7 @@ export function buildRadioKiosk(): Schematic {
   };
 
   // An LMR33630 buck at 400 kHz. Values are the datasheet's Table 9-1 rows for
-  // 12 V and 5 V; the 18.5 V row is derived (RFBB = 100k / (Vout - 1)).
+  // 12 V and 5 V; the 15.6 V row is derived (RFBB = 100k / (Vout - 1)).
   // One 10 uH XAL7030 for all three: the 12 V row asks for 15 uH, which only
   // buys lower ripple at loads this board never reaches.
   const buck = (n: number, vout: number, rfbb: string, coutV: string, vinNet: string, voutNet: string, x: number, y: number) => {
@@ -460,16 +460,18 @@ export function buildRadioKiosk(): Schematic {
   idealDiode(2, "VIN_DC", "VIN", 100, 90);
   c("C90", "22u/50V", 180, 60, "VIN", "GND", FP.c1210);
   c("C91", "22u/50V", 188, 60, "VIN", "GND", FP.c1210);
-  // Vin sense: 100k / 11.5k puts 16 V at 1.65 V, the comparator's reference.
+  // Vin sense: 100k / 14.0k puts 13.4 V at 1.65 V, the comparator's reference.
+  // Low enough that the Toughbook's 15.6 V brick and the PD 15 V profile both
+  // count as a live input; the 12 V buck is fine down to ~13 V.
   r("R90", "100k", 210, 50, "VIN", "VIN_SENSE");
-  r("R91", "11.5k", 210, 62, "VIN_SENSE", "GND");
+  r("R91", "14.0k", 210, 62, "VIN_SENSE", "GND");
 
   // #region rails
   buck(3, 12, "9.09k", "25V", "VIN", "+12V_BUCK", 80, 170);
   idealDiode(6, "+12V_BUCK", "+12V", 230, 170); // blocks the pack from pushing into a dead buck
-  buck(4, 18.5, "5.76k", "35V", "VIN", "+18V5_BUCK", 80, 260);
-  idealDiode(7, "+18V5_BUCK", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
-  part("J3", BARREL.libId, "Laptop out 18.5V, PJ-002BH 5.5x2.5 (v1 jack)", 300, 260);
+  buck(4, 15.6, "6.81k", "25V", "VIN", "+15V6_BUCK", 80, 260);
+  idealDiode(7, "+15V6_BUCK", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
+  part("J3", BARREL.libId, "Laptop out 15.6V, PJ-002BH 5.5x2.5 (v1 jack)", 300, 260);
   label("J3", "1", "LAPTOP_OUT");
   label("J3", "2", "GND");
   nc("J3", "3");
@@ -801,8 +803,8 @@ export function buildRadioKiosk(): Schematic {
     ["STAGES 1-3 DONE: power tree, radio port, MCU. Stage 4 = the board. Port placement for the board: TOP edge = laptop side (J6 RJ45 laptop, J3 laptop DC out, the USB-C serial). RIGHT edge = power in (J1 PD trigger module, J2 DC jack). BOTTOM edge = radio (J5 RJ45 radio). D30 sits by the power inputs, D31 by the radio jack. Cells on the bottom side.", 560],
     ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
     ["PSE: LTC4279 (SO-16) per datasheet Figure 13. PORT_P is its AGND supply through R70 10R; board GND is its VEE; Q22 (PSMN075-100MSEX, ADI's recommended FET) switches PORT_N through R72 0.1R. PWRMODE 3.32k = Type 2, 25.5 W. RESET pulled down: port off until the MCU raises PSE_EN. PSE_ON is low while powered. VSSK and R72's ground end must be one Kelvin trace.", 665],
-    ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
-    ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the 18.5 V one runs in dropout on a 20 V brick and passes ~19 V through, which a laptop accepts.", 590],
+    ["INPUTS: 14-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; the Toughbook's own 15.6 V brick or a 19-20 V laptop brick also work. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE: 20 V = 2.46 V, 15.6 V = 1.92 V, 13.4 V = 1.65 V (battery takes over), 9 V = 1.11 V, 5 V = 0.61 V.", 575],
+    ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the laptop one is set to 15.6 V (the Toughbook brick voltage) and runs in dropout on that brick, passing ~15.3 V.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. No laptop-rail enable (the laptop buck is only shed by Vin sagging); add a FET on its EN if firmware ever needs to shed it. USB serial is self-powered: no brick or battery, no console.", 635],
@@ -842,7 +844,7 @@ export function buildRadioKiosk(): Schematic {
     C30: "C53084452", C40: "C53084452", C50: "C53084452", // 10u/50V 1210
     C34: "C53084530", C35: "C53084530", C36: "C53084530", C37: "C53084530", // 22u/25V 1210
     C54: "C53084530", C55: "C53084530", C56: "C53084530", C57: "C53084530",
-    C44: "C778721", C45: "C778721", C46: "C778721", C47: "C778721", // 22u/35V 1210
+    C44: "C53084530", C45: "C53084530", C46: "C53084530", C47: "C53084530", // 22u/25V 1210
     C22: "C53084452", // 10u/25V -> same 50V part
     C23: "C337978", C24: "C337978", // 4.7u/100V 1210
     J1: "C20079", // XH-2A
