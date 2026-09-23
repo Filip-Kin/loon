@@ -336,6 +336,25 @@ const INA180: IcSymbolSpec = {
   ],
 };
 
+const INA180A2: IcSymbolSpec = { ...INA180, libId: "Amplifier_Current:INA180A2", value: "INA180A2IDBVR", description: "High-side current-sense amplifier, gain 50, SOT-23-5 (pinout A). Laptop rail current for the constant-current loop: 1 V per amp with a 20 mR shunt." };
+
+const LMV321: IcSymbolSpec = {
+  libId: "Amplifier_Operational:LMV321",
+  refPrefix: "U",
+  value: "LMV321",
+  description: "Rail-to-rail single op-amp, SOT-23-5. The integrator of the laptop rail's constant-current loop: when the rail current exceeds the firmware setpoint it lifts the buck's FB pin and the rail folds back instead of the charger tripping.",
+  keywords: "opamp single rail-to-rail",
+  datasheet: "https://www.ti.com/lit/ds/symlink/lmv321.pdf",
+  footprint: FP.sot23_5,
+  pins: [
+    { number: "1", name: "IN+", type: "input", side: "left" },
+    { number: "2", name: "GND", type: "power_in", side: "left" },
+    { number: "3", name: "IN-", type: "input", side: "left" },
+    { number: "4", name: "OUT", type: "output", side: "right" },
+    { number: "5", name: "VCC", type: "power_in", side: "right" },
+  ],
+};
+
 const AHCT1G125: IcSymbolSpec = {
   libId: "Logic_LevelTranslator:SN74AHCT1G125",
   refPrefix: "U",
@@ -395,7 +414,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -504,7 +523,36 @@ export function buildRadioKiosk(): Schematic {
   // Laptop rail under firmware control, off at reset. On a shared USB-C port
   // the laptop's charge demand can exceed the allocation; firmware decides.
   r("R92", "100k", 80, 300, "LAPTOP_EN", "GND");
-  idealDiode(7, "+15V6_BUCK", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
+  // Constant-current limit on the laptop rail. R96 + U42 read the rail current
+  // (1 V/A). U43 integrates (sense - setpoint): above the setpoint its output
+  // rises and, through D40/R98, lifts the buck's FB node so the rail folds
+  // back. The setpoint LAPTOP_ILIM is a filtered PWM from the MCU, 1 V per amp,
+  // so firmware sets the laptop's share of a shared charger and the charger
+  // never sees an overload. Below the limit D40 is off and the buck is a
+  // normal 15.6 V source.
+  r("R96", "20m 1W", 170, 246, "+15V6_BUCK", "+15V6_S", FP.r2512);
+  part("U42", INA180A2.libId, "INA180A2", 170, 262);
+  label("U42", "1", "LAPTOP_ISENSE");
+  label("U42", "2", "GND");
+  label("U42", "3", "+15V6_BUCK");
+  label("U42", "4", "+15V6_S");
+  label("U42", "5", "+3V3");
+  c("C116", "100n", 186, 262, "+3V3", "GND");
+  part("U43", LMV321.libId, "LMV321", 170, 290);
+  label("U43", "1", "LAPTOP_ISENSE");
+  label("U43", "2", "GND");
+  label("U43", "3", "LAPTOP_ILIM_N");
+  label("U43", "4", "LAPTOP_CC");
+  label("U43", "5", "+3V3");
+  r("R97", "100k", 150, 290, "LAPTOP_ILIM", "LAPTOP_ILIM_N");
+  c("C117", "10n", 186, 300, "LAPTOP_CC", "LAPTOP_ILIM_N");
+  part("D40", "Device:D", "1N4148W", 200, 290, "Diode_SMD:D_SOD-123");
+  label("D40", "2", "LAPTOP_CC");
+  label("D40", "1", "LAPTOP_CC_D");
+  r("R98", "4.7k", 210, 290, "LAPTOP_CC_D", "U4_FB");
+  r("R99", "10k", 130, 290, "LAPTOP_ILIM_PWM", "LAPTOP_ILIM");
+  c("C118", "1u", 130, 304, "LAPTOP_ILIM", "GND");
+  idealDiode(7, "+15V6_S", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
   part("J3", BARREL.libId, "Laptop out 15.6V, PJ-002BH 5.5x2.5 (v1 jack)", 300, 260);
   label("J3", "1", "LAPTOP_OUT");
   label("J3", "2", "GND");
@@ -745,8 +793,9 @@ export function buildRadioKiosk(): Schematic {
     "1": "+3V3", "8": "GND", "9": "MCU_VDDA", "23": "GND", "35": "GND", "47": "GND", "24": "+3V3", "36": "+3V3", "48": "+3V3",
     "7": "MCU_NRST", "44": "MCU_BOOT0",
     "10": "VIN_SENSE", "11": "PACK_SENSE", "12": "PASSIVE_IMON", "13": "TEMP_SENSE", "14": "FAN_SENSE", // ADC0-4
-    "15": "USB_ISENSE", "17": "DCIN_SENSE", // ADC5, ADC7
-    "18": "LAPTOP_EN", // PB0
+    "15": "USB_ISENSE", "17": "DCIN_SENSE", "19": "LAPTOP_ISENSE", // ADC5, ADC7, ADC9
+    "20": "LAPTOP_EN", // PB2
+    "30": "LAPTOP_ILIM_PWM", // PA9 TIM1_CH2, filtered to the CC setpoint (1 V per amp)
     "25": "TEST_LOAD", "26": "BOOST_SD", "27": "PASSIVE_EN", "28": "PSE_EN", // PB12-15
     "16": "FAN_PWM", // PA6 TIM3_CH1
     "29": "LED_DATA", // PA8 TIM1_CH1 (PWM+DMA for the WS2812 stream)
@@ -757,19 +806,19 @@ export function buildRadioKiosk(): Schematic {
   for (const [pin, net] of Object.entries(mcuPins)) label("U40", pin, net);
   // Power pins per the datasheet power supply scheme: 100n at each VDD plus
   // 4.7u bulk, VDDA through a 10R/1u+10n filter, VBAT tied to 3V3 (no RTC).
-  c("C120", "4.7u", mx - 60, my - 40, "+3V3", "GND");
-  c("C121", "100n", mx - 52, my - 40, "+3V3", "GND");
-  c("C122", "100n", mx - 44, my - 40, "+3V3", "GND");
-  c("C123", "100n", mx - 36, my - 40, "+3V3", "GND");
+  c("C130", "4.7u", mx - 60, my - 40, "+3V3", "GND");
+  c("C131", "100n", mx - 52, my - 40, "+3V3", "GND");
+  c("C132", "100n", mx - 44, my - 40, "+3V3", "GND");
+  c("C133", "100n", mx - 36, my - 40, "+3V3", "GND");
   r("R112", "10R", mx - 60, my - 24, "+3V3", "MCU_VDDA");
-  c("C124", "1u", mx - 52, my - 24, "MCU_VDDA", "GND");
-  c("C125", "10n", mx - 44, my - 24, "MCU_VDDA", "GND");
+  c("C134", "1u", mx - 52, my - 24, "MCU_VDDA", "GND");
+  c("C135", "10n", mx - 44, my - 24, "MCU_VDDA", "GND");
   // Reset and boot. NRST has an internal pull-up; the 100n is the datasheet's
   // noise filter. BOOT0 pulled down; holding SW2 at reset enters USB DFU.
   part("SW1", "Switch:SW_Push", "RESET", mx - 60, my);
   label("SW1", "1", "MCU_NRST");
   label("SW1", "2", "GND");
-  c("C126", "100n", mx - 60, my + 14, "MCU_NRST", "GND");
+  c("C136", "100n", mx - 60, my + 14, "MCU_NRST", "GND");
   part("SW2", "Switch:SW_Push", "BOOT0 (DFU)", mx - 60, my + 30);
   label("SW2", "1", "MCU_BOOT0");
   label("SW2", "2", "+3V3");
@@ -843,8 +892,8 @@ export function buildRadioKiosk(): Schematic {
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the laptop one is set to 15.6 V (the Toughbook brick voltage) and runs in dropout on that brick, passing ~15.3 V.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
-    ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN); firmware turns it on, and whether it stays on from a shared USB-C port depends on the Toughbook backing off on a weak source (untested: bench supply at 15.6 V / 2.5 A limit). USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE. Out: PB0 LAPTOP_EN (off at reset), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN) and constant-current limited (LAPTOP_ILIM): firmware sets the limit to allocation minus the box draw so a shared charger never trips; what the Toughbook does when limited is untested (bench supply 15.6 V / 2.5 A). USB serial is self-powered: no brick or battery, no console.", 635],
+    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
@@ -899,6 +948,9 @@ export function buildRadioKiosk(): Schematic {
     RT1: "C13564", // NCP18XH103F03RB
     U40: "C80488", // STM32F072C8T6
     U41: "C122228", // INA180A1IDBVR
+    U42: "C192764", // INA180A2IDBVR
+    U43: "C395459", // LMV321
+    D40: "C2099", // 1N4148W
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
   for (const [ref, code] of Object.entries(lcsc)) {
