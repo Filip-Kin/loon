@@ -355,6 +355,70 @@ const LMV321: IcSymbolSpec = {
   ],
 };
 
+const USBC_PD: IcSymbolSpec = {
+  libId: "Connector:USB_C_Receptacle_PD",
+  refPrefix: "J",
+  value: "TYPE-C-31-M-12",
+  description: "USB-C 16-pin receptacle rated 20 V 5 A (Korean Hroparts TYPE-C-31-M-12, LCSC C165948, footprint from LCSC). The USB 2.0 subset: VBUS, GND, CC1/CC2, D+/D-, SBU. Pad names follow the land pattern, paired pads share a name.",
+  keywords: "usb-c receptacle power delivery 100w",
+  footprint: "LCSC:USB-C_TYPE-C-31-M-12",
+  pins: [
+    { number: "A4B9", name: "VBUS", type: "power_in", side: "left" },
+    { number: "B4A9", name: "VBUS", type: "power_in", side: "left" },
+    { number: "A1B12", name: "GND", type: "power_in", side: "left" },
+    { number: "B1A12", name: "GND", type: "power_in", side: "left" },
+    { number: "A5", name: "CC1", type: "bidirectional", side: "right" },
+    { number: "B5", name: "CC2", type: "bidirectional", side: "right" },
+    { number: "A6", name: "D+", type: "bidirectional", side: "right" },
+    { number: "A7", name: "D-", type: "bidirectional", side: "right" },
+    { number: "B6", name: "D+2", type: "bidirectional", side: "right" },
+    { number: "B7", name: "D-2", type: "bidirectional", side: "right" },
+    { number: "A8", name: "SBU1", type: "no_connect", side: "right" },
+    { number: "B8", name: "SBU2", type: "no_connect", side: "right" },
+    { number: "1", name: "SHELL", type: "passive", side: "left" },
+    { number: "2", name: "SHELL", type: "passive", side: "left" },
+    { number: "3", name: "SHELL", type: "passive", side: "left" },
+    { number: "4", name: "SHELL", type: "passive", side: "left" },
+  ],
+};
+
+const CH224A: IcSymbolSpec = {
+  libId: "Interface_USB:CH224A",
+  refPrefix: "U",
+  value: "CH224A",
+  description: "USB PD sink controller, ESSOP-10. Asks the charger for 20 V (CFG1 120k to GND, CFG2/CFG3 have internal pull-ups). VHV takes VBUS directly. PG is open-drain, low when the request was granted. Replaces the plug-in trigger board. Pinout from the WCH CH224 datasheet v2.0 Table 4-1.",
+  keywords: "usb pd sink trigger decoy",
+  footprint: "LCSC:ESSOP-10_CH224A",
+  pins: [
+    { number: "1", name: "VHV", type: "power_in", side: "left" },
+    { number: "2", name: "CFG2/SCL", type: "input", side: "left" },
+    { number: "3", name: "CFG3/SDA", type: "input", side: "left" },
+    { number: "4", name: "DP", type: "bidirectional", side: "left" },
+    { number: "5", name: "DM", type: "bidirectional", side: "left" },
+    { number: "6", name: "CC2", type: "bidirectional", side: "right" },
+    { number: "7", name: "CC1", type: "bidirectional", side: "right" },
+    { number: "8", name: "VBUS", type: "input", side: "right" },
+    { number: "9", name: "CFG1", type: "input", side: "right" },
+    { number: "10", name: "PG", type: "open_collector", side: "right" },
+    { number: "11", name: "EPAD", type: "power_in", side: "right" },
+  ],
+};
+
+const WS2812B_4020: IcSymbolSpec = {
+  libId: "LED:WS2812B-4020",
+  refPrefix: "D",
+  value: "WS2812B-4020",
+  description: "Side-emitting addressable RGB LED, 4 x 2 mm, sits at the board edge and shines out through the case wall next to the port it describes. Pinout from the WS2812B-4020 datasheet (LCSC C965557).",
+  keywords: "rgb led addressable side view",
+  footprint: "LCSC:LED-SMD_WS2812B-4020",
+  pins: [
+    { number: "1", name: "DIN", type: "input", side: "left" },
+    { number: "2", name: "VDD", type: "power_in", side: "left" },
+    { number: "3", name: "DOUT", type: "output", side: "right" },
+    { number: "4", name: "VSS", type: "power_in", side: "left" },
+  ],
+};
+
 const AHCT1G125: IcSymbolSpec = {
   libId: "Logic_LevelTranslator:SN74AHCT1G125",
   refPrefix: "U",
@@ -414,7 +478,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, NTC]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -479,9 +543,37 @@ export function buildRadioKiosk(): Schematic {
   };
 
   // #region inputs: USB-C PD trigger module and a DC jack, ideal-diode ORed onto VIN
-  part("J1", "Connector:Conn_01x02", "USB-C PD trigger 20V", 30, 40, FP.xh2);
-  label("J1", "1", "VIN_USB");
-  label("J1", "2", "GND");
+  // USB-C PD input on the board: the receptacle and a CH224A asking for 20 V.
+  // VBUS lands on VIN_USB as the trigger board's output used to.
+  part("J1", USBC_PD.libId, "USB-C PD in", 30, 40);
+  label("J1", "A4B9", "VIN_USB");
+  label("J1", "B4A9", "VIN_USB");
+  label("J1", "A1B12", "GND");
+  label("J1", "B1A12", "GND");
+  label("J1", "A5", "PD_CC1");
+  label("J1", "B5", "PD_CC2");
+  label("J1", "A6", "PD_DP");
+  label("J1", "A7", "PD_DM");
+  label("J1", "B6", "PD_DP");
+  label("J1", "B7", "PD_DM");
+  nc("J1", "A8");
+  nc("J1", "B8");
+  for (const p of ["1", "2", "3", "4"]) label("J1", p, "GND");
+  part("U50", CH224A.libId, "CH224A", 30, 60);
+  label("U50", "1", "VIN_USB");
+  label("U50", "8", "VIN_USB");
+  nc("U50", "2"); // CFG2, internal pull-up: single-resistor mode
+  nc("U50", "3"); // CFG3, internal pull-up
+  label("U50", "4", "PD_DP");
+  label("U50", "5", "PD_DM");
+  label("U50", "6", "PD_CC2");
+  label("U50", "7", "PD_CC1");
+  label("U50", "9", "PD_CFG1");
+  label("U50", "10", "PD_PG");
+  label("U50", "11", "GND");
+  r("R120", "120k 1%", 50, 60, "PD_CFG1", "GND"); // 120k = 20 V (CH224 Table 5-1)
+  c("C140", "1u/50V", 50, 70, "VIN_USB", "GND", FP.c1206);
+  r("R121", "10k", 50, 80, "+3V3", "PD_PG");
   part("J2", BARREL.libId, "DC in 18-26V, PJ-002BH 5.5x2.5", 30, 90);
   label("J2", "1", "VIN_DC");
   label("J2", "2", "GND");
@@ -803,6 +895,7 @@ export function buildRadioKiosk(): Schematic {
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
     "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
     "42": "UART_TX", "43": "UART_RX", // PB6/PB7 USART1
+    "45": "PD_PG", // PB8, low = the charger granted 20 V
   };
   for (const [pin, net] of Object.entries(mcuPins)) label("U40", pin, net);
   // Power pins per the datasheet power supply scheme: 100n at each VDD plus
@@ -851,17 +944,17 @@ export function buildRadioKiosk(): Schematic {
   label("U30", "5", "+5V");
   c("C110", "100n", lx, ly + 16, "+5V", "GND");
   r("R103", "100R", lx + 30, ly, "LED_D0", "LED_D0R");
-  part("D30", WS2812B.libId, "WS2812B power LED", lx + 60, ly);
-  label("D30", "1", "+5V");
-  label("D30", "3", "GND");
-  label("D30", "4", "LED_D0R");
-  label("D30", "2", "LED_D1");
+  part("D30", WS2812B_4020.libId, "WS2812B-4020 power LED", lx + 60, ly);
+  label("D30", "2", "+5V");
+  label("D30", "4", "GND");
+  label("D30", "1", "LED_D0R");
+  label("D30", "3", "LED_D1");
   c("C111", "100n", lx + 60, ly + 16, "+5V", "GND");
-  part("D31", WS2812B.libId, "WS2812B radio LED", lx + 100, ly);
-  label("D31", "1", "+5V");
-  label("D31", "3", "GND");
-  label("D31", "4", "LED_D1");
-  nc("D31", "2");
+  part("D31", WS2812B_4020.libId, "WS2812B-4020 radio LED", lx + 100, ly);
+  label("D31", "2", "+5V");
+  label("D31", "4", "GND");
+  label("D31", "1", "LED_D1");
+  nc("D31", "3");
   c("C112", "100n", lx + 100, ly + 16, "+5V", "GND");
 
   // Fan: 2-pin 30 mm on the 12 V rail, low-side AO3400A at 25 kHz PWM, SS14
@@ -896,7 +989,7 @@ export function buildRadioKiosk(): Schematic {
     ["STAGES 1-3 DONE: power tree, radio port, MCU. Stage 4 = the board. Port placement for the board: TOP edge = laptop side (J6 RJ45 laptop, J3 laptop DC out, the USB-C serial). RIGHT edge = power in (J1 PD trigger module, J2 DC jack). BOTTOM edge = radio (J5 RJ45 radio). D30 sits by the power inputs, D31 by the radio jack. Cells on the bottom side.", 560],
     ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
     ["PSE: LTC4279 (SO-16) per datasheet Figure 13. PORT_P is its AGND supply through R70 10R; board GND is its VEE; Q22 (PSMN075-100MSEX, ADI's recommended FET) switches PORT_N through R72 0.1R. PWRMODE 3.32k = Type 2, 25.5 W. RESET pulled down: port off until the MCU raises PSE_EN. PSE_ON is low while powered. VSSK and R72's ground end must be one Kelvin trace.", 665],
-    ["INPUTS: 14-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; the Toughbook's own 15.6 V brick or a 19-20 V laptop brick also work. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE: 20 V = 2.46 V, 15.6 V = 1.92 V, 13.4 V = 1.65 V (battery takes over), 9 V = 1.11 V, 5 V = 0.61 V.", 575],
+    ["INPUTS: 14-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. The USB-C PD sink (CH224A) is on the board now, no trigger module. Standard supply is a 24 V 5 A brick; the Toughbook's own 15.6 V brick or a 19-20 V laptop brick also work. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE: 20 V = 2.46 V, 15.6 V = 1.92 V, 13.4 V = 1.65 V (battery takes over), 9 V = 1.11 V, 5 V = 0.61 V.", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the laptop one is set to 15.6 V (the Toughbook brick voltage) and runs in dropout on that brick, passing ~15.3 V.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
@@ -940,7 +1033,8 @@ export function buildRadioKiosk(): Schematic {
     C44: "C53084530", C45: "C53084530", C46: "C53084530", C47: "C53084530", // 22u/25V 1210
     C22: "C53084452", // 10u/25V -> same 50V part
     C23: "C337978", C24: "C337978", // 4.7u/100V 1210
-    J1: "C20079", // XH-2A
+    J1: "C165948", // TYPE-C-31-M-12 receptacle, 20 V 5 A
+    U50: "C42459160", // CH224A
     J2: "C22359705", J3: "C22359705", // PJ-002BH 5.5x2.5, same jack both ends so the laptop brick can feed the box
     J5: "C385834", J6: "C385834", // R-RJ45R08P-A004
     U22: "C687935", // LTC4279IS#PBF (10 in stock at JLC, buy the rest at DigiKey)
@@ -949,7 +1043,7 @@ export function buildRadioKiosk(): Schematic {
     D70: "C10762", D71: "C96324", // SMAJ58A, S1B
     Q10: "C8545", // 2N7002
     U30: "C7484", // SN74AHCT1G125DBVR
-    D30: "C2761795", D31: "C2761795", // WS2812B-B/T
+    D30: "C965557", D31: "C965557", // WS2812B-4020 side view
     D32: "C2480", // SS14 (basic)
     Q30: "C20917", // AO3400A (basic)
     J8: "C20079", // XH-2A

@@ -42,9 +42,9 @@ const GROUPS: Group[] = [
   { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 88, y: 13 } },
   { name: "mcu", refs: [/^U40$/, /^C13[0-6]$/, /^R11[12]$/, /^SW[12]$/, /^R26$/, /^R100$/, /^U30$/, /^C110$/, /^R103$/], at: { x: 48, y: 35 } },
   { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 70, y: 34 } },
-  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 90, y: 41 } },
-  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 72, y: 48 } },
-  { name: "led_pwr", refs: [/^D30$/, /^C111$/], at: { x: 88, y: 50 } },
+  { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 84, y: 44 } },
+  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 84, y: 55 } },
+  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 70, y: 50 } },
   { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 13, y: 42 } },
   { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 33, y: 52 } },
   { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 13, y: 78 } },
@@ -54,7 +54,7 @@ const GROUPS: Group[] = [
   { name: "efuse", refs: [/^U21$/, /^R6[0-3]$/, /^C6[0-2]$/, /^Q13$/], at: { x: 82, y: 82 } },
   { name: "backup", refs: [/^F1$/, /^Q8$/, /^R8[0-9]$/, /^Q9$/, /^Q1[01]$/, /^U10$/, /^C99$/], at: { x: 46, y: 108 } },
   { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 72, y: 110 } },
-  { name: "port", refs: [/^D22$/, /^C112$/, /^D31$/], at: { x: 28, y: 118 } },
+  { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 30, y: 118 } },
   { name: "cells", refs: [/^BT[1-4]$/], at: { x: 52, y: 43 }, side: "B" },
 ];
 
@@ -63,11 +63,15 @@ const GROUPS: Group[] = [
 const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotation?: number }[] = [
   { ref: "J6", at: { x: 16, y: 11 }, face: "N" }, // laptop RJ45, top left
   { ref: "J3", at: { x: 31, y: 8 }, face: "N" }, // laptop DC out
-  { ref: "J9", at: { x: 66, y: 4 }, face: "N", rotation: 0 }, // SWD, along the edge
-  { ref: "J11", at: { x: 78, y: 4 }, face: "N", rotation: 0 }, // UART, along the edge
-  { ref: "J8", at: { x: 66, y: 12 }, face: "N", rotation: 0 }, // fan (internal)
+  { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
+  { ref: "J11", at: { x: 82, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
+  { ref: "J8", at: { x: 66, y: 13 }, face: "N", rotation: 90 }, // fan (internal)
   { ref: "J2", at: { x: 92, y: 30 }, face: "E" }, // DC in
-  { ref: "J1", at: { x: 95, y: 71 }, face: "E" }, // PD trigger cable
+  { ref: "J1", at: { x: 96, y: 67 }, face: "E" }, // USB-C PD in (SMD receptacle)
+  // Side-emitting LEDs at the wall, beside the ports they describe. Their
+  // rotation is a guess until the lens direction is checked in KiCad's 3D view.
+  { ref: "D30", at: { x: 98, y: 48 }, face: "E", rotation: 90 }, // power LED between J2 and J1
+  { ref: "D31", at: { x: 30, y: 128 }, face: "S", rotation: 0 }, // radio LED beside J5
   { ref: "J5", at: { x: 16, y: 117 }, face: "S" }, // radio RJ45, bottom left
 ];
 
@@ -213,7 +217,7 @@ for (const h of holes) taken.push({ x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2: h.at
 for (const p of cellPads) taken.push({ x1: p.x - 2, y1: p.y - 2, x2: p.x + 2, y2: p.y + 2 });
 const hits = (r: R) => taken.some((t) => r.x1 < t.x2 && r.x2 > t.x1 && r.y1 < t.y2 && r.y2 > t.y1);
 const GAP = 0.6;
-const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, vin: 14, buck12: 20, bulk: 28, buck15: 22, buck5: 16, ntc: 8, fan: 12, backup: 28, boost: 30, efuse: 20, pse: 24, port: 8, led_pwr: 8 };
+const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 20, bulk: 28, buck15: 22, buck5: 16, ntc: 8, fan: 12, backup: 28, boost: 30, efuse: 20, pse: 24, port: 8 };
 for (const g of GROUPS) {
   if (g.name === "cells") continue;
   const members = board.footprints.filter((f) => groupOf.get(f.ref) === g && !connectorRefs.has(f.ref) && !/USB_C_Receptacle/.test(f.libId));
@@ -269,10 +273,12 @@ for (const o of overlaps.slice(0, 30)) console.log("  overlap:", o.message);
 // #region copper
 if (!placeOnly) {
   const power = (n: string) => /^(\+|GND$|VIN|PORT_P|PORT_N|PACK|LAPTOP_OUT|\+15V6|FAN_N)/.test(n);
-  const rr = autoroute(board, footprints, nl, { maxSeconds: 240, powerNet: power });
-  board.tracks = rr.tracks;
-  board.vias = rr.vias;
-  console.log(`autoroute: ${rr.routed} routed, ${rr.failed} failed, ${rr.skipped.length} power nets left for copper, ${rr.seconds.toFixed(0)} s`);
+  // loon's grid router is kept out of the file: it fans tracks into pads and
+  // leaves every power net alone, so the result is noise a KiCad user has to
+  // delete first. Placement, nets and pour outlines are the deliverable.
+  void autoroute; void power;
+  board.tracks = [];
+  board.vias = [];
   const pours = planPours(board, nl, {
     nets: [
       { name: "GND", layer: "B.Cu", priority: 0 },
@@ -287,8 +293,25 @@ if (!placeOnly) {
 
 // #region write
 if (project) {
+  // Reference designators sit just above the part's outline, not on it, so
+  // they stay readable with the part fitted. Set on the land pattern, so every
+  // instance of a footprint gets the same offset (KiCad rotates it with the part).
   const raw: Record<string, any> = {};
-  for (const [id, fp] of Object.entries(footprints)) if (fp.raw) raw[id] = fp.raw;
+  for (const [id, fp] of Object.entries(footprints)) {
+    if (!fp.raw) continue;
+    const r = structuredClone(fp.raw) as any;
+    const yAbove = +(fp.bbox.min.y - 0.9).toFixed(2);
+    const atNode = { kind: "list", items: [{ kind: "atom", value: "at" }, { kind: "atom", value: "0" }, { kind: "atom", value: String(yAbove) }] };
+    for (const it of r.items ?? []) {
+      if (it.kind !== "list") continue;
+      const head = it.items?.[0]?.value;
+      const isRef = (head === "fp_text" && it.items?.[1]?.value === "reference") || (head === "property" && it.items?.[1]?.value === "Reference");
+      if (!isRef) continue;
+      const i = it.items.findIndex((x: any) => x.kind === "list" && x.items?.[0]?.value === "at");
+      if (i >= 0) it.items[i] = atNode; else it.items.push(atNode);
+    }
+    raw[id] = r;
+  }
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2));
   await storage.writeFile(project, "board.kicad_pcb", serializeBoard(board, raw));
   await storage.writeFile(project, "board.kicad_pro", serializeProject(board, "board"));
