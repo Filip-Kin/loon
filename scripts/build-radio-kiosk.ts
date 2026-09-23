@@ -12,9 +12,10 @@
 // Not done: the MCU and its sensors/LEDs/fan (stage three), the board (stage
 // four). Every net the later stages need is a named label on this sheet.
 //
-// Built for hand assembly of 2-4 boards on an OSH Park 2-layer run: SOIC,
-// SOT-23, 0805 and up, nothing with a hidden pad except the three HSOIC-8
-// bucks (their pad is soldered through back-side vias). No QFN.
+// All SMT except the connectors and the cell holders, so the same BOM goes to
+// an assembly house later without a part change. The first 2-4 are hand-built,
+// so every IC is SO / SOT-23 / HTSSOP (no leadless packages) and passives are
+// 0805 and up. Exposed pads get back-side vias for the hot-air pass.
 //
 // Run: bun run scripts/build-radio-kiosk.ts <project> [board]
 import { library } from "../server/src/services/library";
@@ -36,11 +37,10 @@ const resolve: LibResolver = (libId) => {
 const FP = {
   r0805: "Resistor_SMD:R_0805_2012Metric",
   r2512: "Resistor_SMD:R_2512_6332Metric",
-  rAxial3W: "Resistor_THT:R_Axial_DIN0617_L17.0mm_D6.0mm_P25.40mm_Horizontal",
   c0805: "Capacitor_SMD:C_0805_2012Metric",
   c1206: "Capacitor_SMD:C_1206_3216Metric",
   c1210: "Capacitor_SMD:C_1210_3225Metric",
-  cRadial10: "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
+  cElec10: "Capacitor_SMD:CP_Elec_10x10.5",
   sma: "Diode_SMD:D_SMA",
   sot23: "Package_TO_SOT_SMD:SOT-23",
   sot23_5: "Package_TO_SOT_SMD:SOT-23-5",
@@ -48,7 +48,9 @@ const FP = {
   hsoic8: "Package_SO:SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.29x3mm",
   soic8ep: "Package_SO:SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm",
   to252: "Package_TO_SOT_SMD:TO-252-2",
-  xal7030: "Inductor_SMD:L_Coilcraft_XAL7030-103",
+  srp7028: "Inductor_SMD:L_Bourns_SRP7028A_7.3x6.6mm",
+  lfpak33: "Package_TO_SOT_SMD:LFPAK33",
+  cElec8: "Capacitor_SMD:CP_Elec_8x10.5",
   fuse1206: "Fuse:Fuse_1206_3216Metric",
   xh2: "Connector_JST:JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical",
   barrel: "Connector_BarrelJack:BarrelJack_Horizontal",
@@ -119,7 +121,7 @@ const TLV7011: IcSymbolSpec = {
 const PMOS_40V: IcSymbolSpec = {
   libId: "Transistor_FET:Power_PMOS_40V",
   refPrefix: "Q",
-  value: "P-MOSFET 40V (SUD50P04-13L)",
+  value: "AOD4185 P-MOSFET 40V",
   description: "40 V P-channel power MOSFET, TO-252. High-side battery switch: source on the pack, drain on the rail, so its body diode points pack-to-rail and never charges the cells.",
   keywords: "mosfet p-channel high side switch",
   footprint: FP.to252,
@@ -134,7 +136,7 @@ const CR123A: IcSymbolSpec = {
   libId: "Device:Battery_CR123A",
   refPrefix: "BT",
   value: "CR123A",
-  description: "One CR123A lithium primary cell in a Bulgin BX0123 PCB holder. Four in series make the 12 V backup pack. Replace all four together.",
+  description: "One CR123A lithium primary cell in a PCB holder (BH-123A-A1CJ002 at LCSC; Bulgin BX0123 footprint stands in until stage 4 imports the LCSC one). Four in series make the 12 V backup pack. Replace all four together.",
   keywords: "battery cell cr123a lithium primary holder",
   footprint: FP.cr123a,
   pins: [
@@ -211,7 +213,7 @@ const TPS26600: IcSymbolSpec = {
 const NMOS_100V: IcSymbolSpec = {
   libId: "Transistor_FET:Power_NMOS_100V",
   refPrefix: "Q",
-  value: "N-MOSFET 100V (SQ4850EY)",
+  value: "AO4482 N-MOSFET 100V",
   description: "100 V N-channel power MOSFET, SOIC-8. The boost switch for the 54 V rail: 60 V is too close to a 54 V output plus ringing.",
   keywords: "mosfet n-channel power 100v",
   footprint: FP.soic8ep,
@@ -226,7 +228,7 @@ const RJ45: IcSymbolSpec = {
   libId: "Connector:RJ45_8P8C",
   refPrefix: "J",
   value: "RJ45 8P8C",
-  description: "Plain 8P8C jack, no magnetics (Amphenol 54602-908 class, the same footprint class as v1's Ckmtw part). Pins 1/2/3/6 are the 100BASE-TX pairs; 4/5 and 7/8 carry PoE Mode B.",
+  description: "Plain 8P8C jack, no magnetics: Ckmtw R-RJ45R08P-A004, the part v1 used (LCSC C385834). Amphenol footprint stands in until stage 4 imports the LCSC one. Pins 1/2/3/6 are the 100BASE-TX pairs; 4/5 and 7/8 carry PoE Mode B.",
   keywords: "rj45 8p8c ethernet jack",
   footprint: "Connector_RJ:RJ45_Amphenol_54602-x08_Horizontal",
   pins: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ number: String(n), name: String(n), type: "passive" as const, side: "left" as const })),
@@ -278,7 +280,7 @@ export function buildRadioKiosk(): Schematic {
   const idealDiode = (n: number, inNet: string, outNet: string, x: number, y: number) => {
     const u = `U${n}`, q = `Q${n}`, cc = `C${n}`;
     part(u, LM74700.libId, "LM74700-Q1", x, y);
-    part(q, "Transistor_FET:Power_NMOS_60V", "N-MOSFET 60V", x + 30, y - 10, FP.soic8ep);
+    part(q, "Transistor_FET:Power_NMOS_60V", "SI4470EY", x + 30, y - 10, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
     c(cc, "100n", x + 30, y + 14, `${u}_VCAP`, inNet);
     label(u, "1", `${u}_VCAP`);
     label(u, "2", "GND");
@@ -303,7 +305,7 @@ export function buildRadioKiosk(): Schematic {
     c(`C${n}1`, "220n/50V", x - 26, y - 6, vinNet, "GND");
     c(`C${n}2`, "1u", x + 34, y + 14, L("VCC"), "GND");
     c(`C${n}3`, "100n", x + 26, y - 20, L("BOOT"), L("SW"));
-    part(`L${n}`, "Device:L", "10u 6A", x + 40, y - 12, FP.xal7030);
+    part(`L${n}`, "Device:L", "SRP7028A-100M 10u 5A", x + 40, y - 12, FP.srp7028);
     label(`L${n}`, "1", L("SW"));
     label(`L${n}`, "2", voutNet);
     for (let i = 0; i < 4; i++) c(`C${n}${4 + i}`, `22u/${coutV}`, x + 56 + i * 8, y + 2, voutNet, "GND", FP.c1210);
@@ -345,7 +347,7 @@ export function buildRadioKiosk(): Schematic {
   // #region rails
   buck(3, 12, "9.09k", "25V", "VIN", "+12V_BUCK", 80, 170);
   idealDiode(6, "+12V_BUCK", "+12V", 230, 170); // blocks the pack from pushing into a dead buck
-  buck(4, 18.5, "5.76k", "50V", "VIN", "+18V5_BUCK", 80, 260);
+  buck(4, 18.5, "5.76k", "35V", "VIN", "+18V5_BUCK", 80, 260);
   idealDiode(7, "+18V5_BUCK", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
   part("J3", BARREL.libId, "Laptop out 18.5V (use a different barrel size than J2)", 300, 260);
   label("J3", "1", "LAPTOP_OUT");
@@ -355,9 +357,12 @@ export function buildRadioKiosk(): Schematic {
   ops.push({ op: "instantiate_module", moduleId: "ldo_3v3", params: { vin_net: "+5V" }, at: { x: 230, y: 350 } });
   // Bulk on the backed-up rail: covers the microseconds between the input
   // dropping and the battery FET closing.
-  part("C98", "Device:C_Polarized", "1000u/25V", 330, 180, FP.cRadial10);
+  part("C98", "Device:C_Polarized", "470u/25V", 330, 180, FP.cElec10);
   label("C98", "1", "+12V");
   label("C98", "2", "GND");
+  part("C97", "Device:C_Polarized", "470u/25V", 342, 180, FP.cElec10);
+  label("C97", "1", "+12V");
+  label("C97", "2", "GND");
 
   // #region battery backup: 4x CR123A, fuse, P-FET switch, comparator
   const bx = 80, by = 450;
@@ -371,12 +376,12 @@ export function buildRadioKiosk(): Schematic {
   label("F1", "2", "PACK_F");
   // High-side P-FET. Gate held at the pack by R80 (off); Q9 pulls it down (on)
   // when the comparator says the input is gone. Body diode points pack -> rail.
-  part("Q8", PMOS_40V.libId, "P-MOSFET 40V", bx + 150, by - 10);
+  part("Q8", PMOS_40V.libId, "AOD4185", bx + 150, by - 10);
   label("Q8", "3", "PACK_F");
   label("Q8", "2", "+12V");
   label("Q8", "1", "BK_GATE");
   r("R80", "100k", bx + 150, by + 14, "PACK_F", "BK_GATE");
-  part("Q9", "Device:Q_NMOS_GSD", "2N7002", bx + 180, by + 14);
+  part("Q9", "Device:Q_NMOS_GSD", "2N7002", bx + 180, by + 14, FP.sot23);
   label("Q9", "3", "BK_GATE");
   label("Q9", "2", "GND");
   label("Q9", "1", "BK_DRV");
@@ -396,8 +401,10 @@ export function buildRadioKiosk(): Schematic {
   c("C99", "100n", bx + 260, by, "+3V3", "GND");
   // Pack sense for the MCU (stage 3) and the loaded self-test: Q11 drops the
   // pack into R85 for 200 ms while the ADC reads PACK_SENSE.
-  r("R85", "12R 3W", bx + 300, by - 10, "PACK_F", "TEST_NODE", FP.rAxial3W);
-  part("Q11", "Transistor_FET:Power_NMOS_60V", "N-MOSFET 60V", bx + 300, by + 14, FP.soic8ep);
+  // Two 24R 2512 in parallel: 12R, 2 W continuous, and the test is 2.4 J pulses.
+  r("R85", "24R 1W", bx + 300, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
+  r("R88", "24R 1W", bx + 310, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
+  part("Q11", "Transistor_FET:Power_NMOS_60V", "SI4470EY", bx + 300, by + 14, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
   label("Q11", "3", "TEST_NODE");
   label("Q11", "2", "GND");
   label("Q11", "1", "TEST_LOAD");
@@ -426,9 +433,9 @@ export function buildRadioKiosk(): Schematic {
   // full 30 W class-4 load: at D = 0.78 the LM3478 has ~84 mV of sense headroom,
   // and 20 mR puts the peak switch limit near 4 A.
   part("U20", LM3478.libId, "LM3478 54V boost", px, py);
-  part("Q20", NMOS_100V.libId, "N-MOSFET 100V", px + 50, py - 20);
-  part("L20", "Device:L", "33u 4A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H6mm");
-  part("D20", "Device:D", "B3100 100V Schottky", px + 70, py - 40, FP.sma);
+  part("Q20", NMOS_100V.libId, "AO4482", px + 50, py - 20);
+  part("L20", "Device:L", "MDA1365-330M 33u 4.5A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H8mm");
+  part("D20", "Device:D", "SS310 100V Schottky", px + 70, py - 40, FP.sma);
   r("R20", "20m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
   r("R21", "40.2k", px - 30, py + 14, "BOOST_FA", "GND");
   r("R22", "402k", px + 100, py - 10, "+54V", "BOOST_FB");
@@ -439,12 +446,12 @@ export function buildRadioKiosk(): Schematic {
   c("C22", "10u/25V", px - 30, py - 30, "+12V", "GND", FP.c1210);
   c("C23", "4.7u/100V", px + 100, py - 30, "+54V", "GND", FP.c1210);
   c("C24", "4.7u/100V", px + 108, py - 30, "+54V", "GND", FP.c1210);
-  part("C25", "Device:C_Polarized", "47u/63V", px + 120, py - 30, FP.cRadial10);
+  part("C25", "Device:C_Polarized", "47u/63V", px + 120, py - 30, FP.cElec8);
   label("C25", "1", "+54V");
   label("C25", "2", "GND");
   // Shutdown from the MCU through a diode so R21 alone still sets the frequency.
   r("R25", "1k", px - 50, py + 26, "BOOST_SD", "BOOST_SDD");
-  part("D21", "Device:D", "1N4148W", px - 40, py + 26);
+  part("D21", "Device:D", "1N4148W", px - 40, py + 26, "Diode_SMD:D_SOD-123");
   label("D21", "2", "BOOST_SDD");
   label("D21", "1", "BOOST_FA");
   label("U20", "1", "BOOST_CS");
@@ -496,7 +503,7 @@ export function buildRadioKiosk(): Schematic {
   c("C62", "1u/100V", ex + 70, ey - 10, "PORT_P", "GND", FP.c1210);
   // Passive return: ties PORT_N to ground while PASSIVE_EN is high. Off in
   // active mode so the PSE's own switch owns the return.
-  part("Q13", "Transistor_FET:Power_NMOS_60V", "N-MOSFET 60V logic-level", ex + 100, ey + 10, FP.soic8ep);
+  part("Q13", "Transistor_FET:Power_NMOS_60V", "SI4470EY", ex + 100, ey + 10, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
   label("Q13", "1", "PASSIVE_EN");
   label("Q13", "2", "GND");
   label("Q13", "3", "PORT_N");
@@ -527,7 +534,7 @@ export function buildRadioKiosk(): Schematic {
     ["INPUTS: 18-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. Standard supply is a 24 V 5 A brick; a 19-20 V laptop brick also works. VIN_SENSE feeds the comparator now and the MCU ADC in stage 3 (20 V = 2.06 V, 15 V = 1.55 V, 9 V = 0.93 V, 5 V = 0.52 V).", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the 18.5 V one runs in dropout on a 20 V brick and passes ~19 V through, which a laptop accepts.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
-    ["ASSEMBLY: OSH Park 2-layer, hand-built. Everything is SOIC / SOT-23 / 0805+ except the three HSOIC-8 bucks and the two SOIC-8 FET packages, whose pads get 4-5 thermal vias and are soldered from the back. No QFN on this board.", 620],
+    ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: J3 must be a different barrel size than J2. Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. BIAS/PG pins unused. MCU override of the backup switch and laptop enable are stage 3.", 635],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
@@ -539,6 +546,43 @@ export function buildRadioKiosk(): Schematic {
   for (const [ref, fp] of footprints) {
     const inst = schem.symbols.find((x) => x.properties.Reference === ref);
     if (inst) inst.properties.Footprint = fp;
+  }
+  // LCSC part numbers (checked against JLCPCB's library 2026-09-23) so the
+  // hand-built prototype and a JLC-assembled run share one BOM.
+  const lcsc: Record<string, string> = {
+    U1: "C2941042", U2: "C2941042", U6: "C2941042", U7: "C2941042", // LM74700QDBVRQ1
+    Q1: "C7568913", Q2: "C7568913", Q6: "C7568913", Q7: "C7568913", Q11: "C7568913", Q13: "C7568913", // SI4470EY
+    U3: "C841384", U4: "C841384", U5: "C841384", // LMR33630ADDAR
+    L3: "C2687402", L4: "C2687402", L5: "C2687402", // SRP7028A-100M
+    U10: "C702117", // TLV7011DBVR
+    U20: "C115907", // LM3478MAX/NOPB
+    U21: "C544399", // TPS26600PWPR
+    Q8: "C400894", // AOD4185
+    Q9: "C8545", // 2N7002 (basic)
+    Q20: "C192576", // AO4482
+    L20: "C2847586", // MDA1365-330M
+    D1: "C148227", D2: "C148227", // SMAJ28A
+    D20: "C15874", // SS310
+    D21: "C2099", // 1N4148W
+    D22: "C10762", // SMAJ58A
+    F1: "C2838912", // 1206TD-2A
+    C97: "C346948", C98: "C346948", // 470u/25V D10x10
+    C25: "C970680", // 47u/63V D8x10
+    C30: "C53084452", C40: "C53084452", C50: "C53084452", // 10u/50V 1210
+    C34: "C53084530", C35: "C53084530", C36: "C53084530", C37: "C53084530", // 22u/25V 1210
+    C54: "C53084530", C55: "C53084530", C56: "C53084530", C57: "C53084530",
+    C44: "C778721", C45: "C778721", C46: "C778721", C47: "C778721", // 22u/35V 1210
+    C22: "C53084452", // 10u/25V -> same 50V part
+    C23: "C337978", C24: "C337978", // 4.7u/100V 1210
+    J1: "C20079", // XH-2A
+    J2: "C22359705", J3: "C22359705", // PJ-002BH
+    J5: "C385834", J6: "C385834", // R-RJ45R08P-A004
+    BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
+  };
+  for (const [ref, code] of Object.entries(lcsc)) {
+    const inst = schem.symbols.find((x) => x.properties.Reference === ref);
+    if (inst) inst.properties.LCSC = code;
+    else console.log(`no part for LCSC ${ref}`);
   }
 
   const defOf = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
