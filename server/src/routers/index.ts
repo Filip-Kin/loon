@@ -13,7 +13,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
-import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad, writeBoardIntoKicad } from "../services/route-render";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad, writeBoardIntoKicad, kicadOwnsBoard } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -157,6 +157,7 @@ async function runAiAction(a: any, project: string, schem: Schematic, job: AiJob
       return targets.map((x) => `${x.pins.length} pins from ${x.ref}`).join(", ");
     }
     case "generate_board": {
+      if (await kicadOwnsBoard(project, unit)) return "board.kicad_pcb belongs to KiCad (it has been saved there): not regenerated. Schematic changes go in through KiCad's Update PCB from Schematic.";
       const footprints = await footprintsFor(schem);
       let existing: Board | undefined;
       if (a.keepPlacement !== false) {
@@ -714,6 +715,7 @@ const pcbRouter = router({
     .input(z.object({ project: z.string(), board: z.string().optional(), passes: z.number().optional(), keepTracks: z.boolean().optional(), dirtyRefs: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {
       const unit = input.board ?? "";
+      if (await kicadOwnsBoard(input.project, unit)) throw new Error("board.kicad_pcb belongs to KiCad: route it there (autorouting here would reset its net classes)");
       const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       await writeNetClasses(input.project, unit, defaultNetClassPlan(board));
       const report = await routeWithFreerouting(input.project, unit, { passes: input.passes ?? 30, keepTracks: input.keepTracks, dirtyRefs: input.dirtyRefs });

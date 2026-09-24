@@ -552,6 +552,12 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   return { tracks: tracks.length, vias: vias.length, filled, moved, added, dropped, texts: texts.length };
 }
 
+// Whether KiCad has saved the board: from then on the file is KiCad's and no
+// loon path may regenerate it.
+export async function kicadOwnsBoard(project: string, unit = ""): Promise<boolean> {
+  try { return /\(generator "pcbnew"\)/.test((await storage.readFile(project, "board.kicad_pcb", unit)).slice(0, 300)); } catch { return false; }
+}
+
 // #region write back into a KiCad-owned board
 // Once KiCad has saved the board it owns the file: footprints loon never
 // fetched, zones, arcs and settings live there only. An edit made in loon's
