@@ -112,7 +112,7 @@ function uprightReference(fpNode: SxList, rotation: number, box: Box | undefined
   if (!box) return;
   const r = ((rotation % 360) + 360) % 360;
   if (r === 0) return;
-  const pad = 0.9;
+  const pad = 0.8;
   const at = r === 90 ? [box.max.x + pad, 0, 270] : r === 270 ? [box.min.x - pad, 0, 90] : r === 180 ? [0, box.max.y + pad, 180] : null;
   if (!at) return;
   for (const it of fpNode.items) {
@@ -124,7 +124,20 @@ function uprightReference(fpNode: SxList, rotation: number, box: Box | undefined
   }
 }
 
-export function serializeBoard(board: Board, rawFootprints: Record<string, SxList>, boxes: Record<string, Box> = {}): string {
+// Parts whose reference should not print (LEDs at the wall, where the
+// text would land on a neighbour): the property is kept but hidden.
+function hideReference(fpNode: SxList) {
+  for (const it of fpNode.items) {
+    if (it.kind !== "list") continue;
+    const head = it.items[0]?.kind === "atom" ? it.items[0].value : "";
+    const isRef = (head === "property" && it.items[1]?.kind === "atom" && it.items[1].value === "Reference") || (head === "fp_text" && it.items[1]?.kind === "atom" && it.items[1].value === "reference");
+    if (!isRef) continue;
+    removeChildren(it, "hide");
+    it.items.push(node("hide", sym("yes")));
+  }
+}
+
+export function serializeBoard(board: Board, rawFootprints: Record<string, SxList>, boxes: Record<string, Box> = {}, hideRefs: Set<string> = new Set()): string {
   const root = list(sym("kicad_pcb"));
   // Board format version must match what the embedded footprints were written
   // for, or KiCad refuses the file outright.
@@ -208,6 +221,7 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
   for (const f of board.footprints) {
     const fpNode = emitFootprint(f, rawFootprints[f.libId], netIndex, board.rules.minDrill);
     if (f.side !== "B") uprightReference(fpNode, f.rotation, boxes[f.libId]);
+    if (hideRefs.has(f.ref)) hideReference(fpNode);
     root.items.push(fpNode);
   }
 

@@ -196,7 +196,9 @@ export function preRouteEthernet(p: Prepared, H: number, laneX0 = 8.0, midX0 = l
   type Tr = { n: string; jogLayer: string; laneX: number; top: Point[]; lane: Point[]; bot: Point[]; vias: Point[]; near: boolean; a: Point; q: Point; rowTop: number; rowBot: number };
   const plan: Tr[] = [];
   PAIRS.forEach((pair, pi) => pair.forEach((n, i) => {
-    const laneX = laneX0 + pi * (PITCH + PAIR_GAP) + i * PITCH;
+    // pair 3/6 sits on 0.8 mm centres: its near-track via has to clear the
+    // far track's lane beside it
+    const laneX = laneX0 + pi * (PITCH + PAIR_GAP) + i * (pi === 1 ? 0.8 : PITCH);
     const a = padOf("J6", n), q = padOf("J5", n);
     const near = a.y > mid6;
     const rowTop = near ? a.y + OFF : a.y - OFF;
@@ -211,16 +213,26 @@ export function preRouteEthernet(p: Prepared, H: number, laneX0 = 8.0, midX0 = l
       : [{ x: laneX, y: rowBot - M }, { x: laneX + M, y: rowBot }, { x: hop5 - M, y: rowBot }, { x: hop5, y: rowBot + M }, { x: hop5, y: H - EDGE_Y - M }, { x: hop5 + M, y: H - EDGE_Y }, { x: q.x - M, y: H - EDGE_Y }, { x: q.x, y: H - EDGE_Y - M }, q];
     const vias: Point[] = [];
     if (pi === 1) {
-      // jog on the front, through to the back past pair 1/2's rows
-      const vTop = { x: laneX, y: nearRow6 + (near ? 2.0 : 1.0) }, vBot = { x: laneX, y: nearRow5 - (near ? 2.0 : 1.0) };
-      top.push(vTop); bot.unshift(vBot); vias.push(vTop, vBot);
+      // jog on the front, through to the back past pair 1/2's rows. The
+      // near track's via is the lower one; its drop runs 0.5 mm outside the
+      // far track's via and turns in at 45 degrees, so the two stay clear.
+      const vTop = { x: laneX, y: nearRow6 + (near ? 2.2 : 1.0) }, vBot = { x: laneX, y: nearRow5 - (near ? 2.2 : 1.0) };
+      if (near) {
+        top.splice(-2, 2, { x: laneX + 0.5 + M, y: rowTop }, { x: laneX + 0.5, y: rowTop + M }, { x: laneX + 0.5, y: vTop.y - 0.5 }, vTop);
+        bot.splice(0, 2, vBot, { x: laneX + 0.5, y: vBot.y + 0.5 }, { x: laneX + 0.5, y: rowBot - M }, { x: laneX + 0.5 + M, y: rowBot });
+      } else { top.push(vTop); bot.unshift(vBot); }
+      vias.push(vTop, vBot);
     }
     // Down the board the lanes sit at the edge (midX0); beside the jacks they
     // are further in (laneX0), past the corner hole. 45-degree jogs between.
+    // Parallel 45-degree jogs on a 0.5 mm pitch would sit 0.35 mm apart:
+    // each track starts its jog PITCH later than the one inside it, which
+    // keeps them 0.7 mm apart along the diagonal.
     const shift = laneX0 - midX0;
+    const jy = jogY + (laneX - laneX0);
     const t0 = top[top.length - 1], b0 = bot[0];
     const lane: Point[] = shift > 0.01
-      ? [t0, { x: laneX, y: jogY }, { x: laneX - shift, y: jogY + shift }, { x: laneX - shift, y: H - jogY - shift }, { x: laneX, y: H - jogY }, b0]
+      ? [t0, { x: laneX, y: jy }, { x: laneX - shift, y: jy + shift }, { x: laneX - shift, y: H - jy - shift }, { x: laneX, y: H - jy }, b0]
       : [t0, b0];
     plan.push({ n, jogLayer: pi === 0 ? "B.Cu" : "F.Cu", laneX, top, lane, bot, vias, near, a, q, rowTop, rowBot });
   }));
@@ -289,7 +301,7 @@ export function checkBoard(p: Prepared, W: number, H: number) {
   return { rats, overlaps, outside };
 }
 
-export async function writeBoard(p: Prepared, project: string | undefined, placeOnly: boolean) {
+export async function writeBoard(p: Prepared, project: string | undefined, placeOnly: boolean, hideRefs: string[] = []) {
   const { board, footprints, nl } = p;
   if (!placeOnly) {
     // loon's grid router is kept out of the file: it fans tracks into pads and
@@ -313,7 +325,7 @@ export async function writeBoard(p: Prepared, project: string | undefined, place
   for (const [id, fp] of Object.entries(footprints)) if (fp.raw) raw[id] = fp.raw;
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2));
   const boxes = Object.fromEntries(Object.entries(footprints).map(([id, fp]) => [id, fp.bbox]));
-  await storage.writeFile(project, "board.kicad_pcb", serializeBoard(board, raw, boxes));
+  await storage.writeFile(project, "board.kicad_pcb", serializeBoard(board, raw, boxes, new Set(hideRefs)));
   await storage.writeFile(project, "board.kicad_pro", serializeProject(board, "board"));
   console.log(`wrote ${project}/board.*`);
 }

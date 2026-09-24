@@ -125,7 +125,8 @@ function normalizeKicad9(root: SxList): void {
 // gets it and KiCad rotates it with the part.
 function placeReferenceAbove(root: SxList, minY: number): void {
   const A = (v: string): Sx => ({ kind: "atom", value: v }) as Sx;
-  const at = { kind: "list", items: [A("at"), A("0"), A((minY - 0.9).toFixed(2))] } as SxList;
+  const at = { kind: "list", items: [A("at"), A("0"), A((minY - 0.8).toFixed(2))] } as SxList;
+  const effects = { kind: "list", items: [A("effects"), { kind: "list", items: [A("font"), { kind: "list", items: [A("size"), A("0.8"), A("0.8")] }, { kind: "list", items: [A("thickness"), A("0.12")] }] }] } as SxList;
   for (const it of root.items) {
     if (it.kind !== "list") continue;
     const head = atom(it.items[0]);
@@ -133,6 +134,9 @@ function placeReferenceAbove(root: SxList, minY: number): void {
     if (!isRef) continue;
     const i = it.items.findIndex((x) => x.kind === "list" && atom((x as SxList).items[0]) === "at");
     if (i >= 0) it.items[i] = at; else it.items.push(at);
+    // 0.8 mm text: readable, and it fits between rows of standing chips
+    const e = it.items.findIndex((x) => x.kind === "list" && atom((x as SxList).items[0]) === "effects");
+    if (e >= 0) it.items[e] = effects; else it.items.push(effects);
   }
 }
 

@@ -272,11 +272,11 @@ print('kept', len(list(b.Tracks())), 'dropped', n)
 
   if (!o.importOnly) {
     const dsn = await kicadPy(dir, `
-  import pcbnew
-  b = pcbnew.LoadBoard('/work/board.kicad_pcb')
-  ok = pcbnew.ExportSpecctraDSN(b, '/work/board.dsn')
-  print('dsn', ok)
-  `);
+import pcbnew
+b = pcbnew.LoadBoard('/work/board.kicad_pcb')
+ok = pcbnew.ExportSpecctraDSN(b, '/work/board.dsn')
+print('dsn', ok)
+`);
     if (!/dsn True/.test(dsn.out)) return fail(`DSN export failed: ${dsn.out.trim().split("\n").pop()}`);
 
     // Ground is the pour on both sides; routing it as tracks wastes the router's
