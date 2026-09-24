@@ -8,6 +8,7 @@
 // an intermediate step on the way to Gerbers.
 
 import type { Point } from "./schematic";
+import { KICAD_PCB_VERSION } from "./kicad-version";
 
 export type BoardSide = "F" | "B";
 
@@ -112,7 +113,7 @@ export interface Board {
 
 export function emptyBoard(rules: DesignRules = OSHPARK_2LAYER): Board {
   return {
-    version: 20241229, // KiCad 9 board format, matching the pinned footprint library
+    version: KICAD_PCB_VERSION,
 
     generator: "loon",
     rules,

@@ -11,13 +11,14 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { storage } from "./storage";
 import { parse, findAll, find } from "@loon/shared/sexpr";
 import { readZoneFills } from "@loon/shared/kicad-pcb";
+import { KICAD_IMAGE, KICAD_LIB_REF, KICAD_3DMODEL_VARS, KICAD_NET_SETTINGS_VERSION } from "@loon/shared/kicad-version";
 import type { Board, Track, Via } from "@loon/shared/board";
 
-const KICAD = process.env.LOON_KICAD_IMAGE ?? "ghcr.io/kicad/kicad:9.0";
+const KICAD = process.env.LOON_KICAD_IMAGE ?? KICAD_IMAGE;
 const FREEROUTING = process.env.LOON_FREEROUTING_IMAGE ?? "ghcr.io/freerouting/freerouting:latest";
 const DOCKER = process.env.LOON_DOCKER_BIN ?? "docker";
 export const MODELS_DIR = process.env.LOON_3D_DIR ?? join(process.cwd(), "data", "3dmodels");
-const MODEL_REF = process.env.LOON_3D_REF ?? "9.0.8";
+const MODEL_REF = process.env.LOON_3D_REF ?? KICAD_LIB_REF;
 
 async function run(args: string[], timeoutMs: number): Promise<{ code: number; out: string }> {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
@@ -175,16 +176,21 @@ export async function writeNetClasses(project: string, unit: string, plan: NetCl
   // 0.18: the USB-C receptacle's pads sit 0.2 mm apart, and OSH Park and
   // JLC both allow 0.15.
   const def = { ...pro.net_settings.classes[0], clearance: 0.18 };
+  // net_settings v4 gives every class a priority; Default keeps INT_MAX so any
+  // named class wins the pattern match. The named ones are disjoint here, so
+  // the order is only a tie-break.
+  const named = (i: number) => ({ ...def, priority: i });
   pro.net_settings.classes = [
     def,
     // One clearance everywhere: the router and DRC must agree, and a wider
     // class clearance only shows up as DRC errors against the narrow one.
-    { ...def, name: "Heavy", track_width: 1.5, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
-    { ...def, name: "Wide", track_width: 1.2, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
-    { ...def, name: "Power", track_width: 0.6, clearance: 0.18, via_diameter: 0.8, via_drill: 0.4 },
-    { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
-    { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
+    { ...named(0), name: "Heavy", track_width: 1.5, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
+    { ...named(1), name: "Wide", track_width: 1.2, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
+    { ...named(2), name: "Power", track_width: 0.6, clearance: 0.18, via_diameter: 0.8, via_drill: 0.4 },
+    { ...named(3), name: "Logic", track_width: 0.4, clearance: 0.2 },
+    { ...named(4), name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
   ];
+  pro.net_settings.meta = { ...(pro.net_settings.meta ?? {}), version: KICAD_NET_SETTINGS_VERSION };
   pro.net_settings.netclass_patterns = [
     ...(plan.heavy ?? []).map((n) => ({ netclass: "Heavy", pattern: n })),
     ...(plan.wide ?? []).map((n) => ({ netclass: "Wide", pattern: n })),
@@ -456,7 +462,10 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
 // not there is reported, not faked.
 export async function fetchModels(pcbText: string): Promise<{ fetched: number; missing: string[] }> {
   const refs = new Set<string>();
-  for (const m of pcbText.matchAll(/\(model "\$\{KICAD9_3DMODEL_DIR\}\/([^"]+)"/g)) refs.add(m[1]);
+  // The cache holds footprints from more than one library tag, and each tag
+  // names the model directory after its own KiCad. Read every name KiCad knows.
+  const varNames = KICAD_3DMODEL_VARS.join("|");
+  for (const m of pcbText.matchAll(new RegExp(`\\(model "\\$\\{(?:${varNames})\\}/([^"]+)"`, "g"))) refs.add(m[1]);
   let fetched = 0;
   const missing: string[] = [];
   for (const rel of refs) {
@@ -483,7 +492,8 @@ export async function renderBoard(project: string, unit = ""): Promise<{ images:
   const pcb = await storage.readFile(project, "board.kicad_pcb", unit);
   const models = await fetchModels(pcb);
   mkdirSync(join(MODELS_DIR, "lcsc.3dshapes"), { recursive: true });
-  const mounts = ["-v", `${dir}:/work`, "-v", `${join(MODELS_DIR, "kicad")}:/models/kicad:ro`, "-v", `${join(MODELS_DIR, "lcsc.3dshapes")}:/work/lcsc.3dshapes:ro`, "-e", "KICAD9_3DMODEL_DIR=/models/kicad", "-w", "/work"];
+  const modelEnv = KICAD_3DMODEL_VARS.flatMap((v) => ["-e", `${v}=/models/kicad`]);
+  const mounts = ["-v", `${dir}:/work`, "-v", `${join(MODELS_DIR, "kicad")}:/models/kicad:ro`, "-v", `${join(MODELS_DIR, "lcsc.3dshapes")}:/work/lcsc.3dshapes:ro`, ...modelEnv, "-w", "/work"];
   const base = [DOCKER, "run", "--rm", ...mounts, KICAD, "kicad-cli", "pcb"];
   const notes: string[] = [];
   const views: [string, string[]][] = [

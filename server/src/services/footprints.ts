@@ -10,12 +10,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseFootprint, generateFootprint, type Footprint } from "@loon/shared/footprint";
+import { KICAD_LIB_REF } from "@loon/shared/kicad-version";
 
 const CACHE_DIR = process.env.LOON_FP_CACHE ?? join(process.cwd(), "data", "footprints");
-// Pinned to the KiCad 9 library tag, not master: master tracks the next KiCad
-// release and emits footprints that KiCad 9 refuses to load. OSH Park processes
-// with the latest stable KiCad, which is 9.x.
-const FP_REF = process.env.LOON_FP_REF ?? "9.0.9.1";
+// Pinned to the library tag of the KiCad container loon runs, not master:
+// master tracks the next KiCad release and emits footprints the pinned KiCad
+// refuses to load.
+const FP_REF = process.env.LOON_FP_REF ?? KICAD_LIB_REF;
 const BASE = process.env.LOON_FP_URL ?? `https://gitlab.com/kicad/libraries/kicad-footprints/-/raw/${FP_REF}`;
 
 const memo = new Map<string, Footprint>();

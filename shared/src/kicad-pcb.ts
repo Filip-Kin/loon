@@ -5,6 +5,7 @@
 // output are byte-for-byte KiCad's own rather than loon's reading of them.
 
 import { serialize, parse, node, sym, str, num, list, find, findAll, type Sx, type SxList } from "./sexpr";
+import { KICAD_PCB_VERSION, KICAD_PRO_VERSION, KICAD_NET_SETTINGS_VERSION } from "./kicad-version";
 import type { Board, PlacedFootprint } from "./board";
 import type { Point } from "./schematic";
 
@@ -139,11 +140,12 @@ function hideReference(fpNode: SxList) {
 
 export function serializeBoard(board: Board, rawFootprints: Record<string, SxList>, boxes: Record<string, Box> = {}, hideRefs: Set<string> = new Set()): string {
   const root = list(sym("kicad_pcb"));
-  // Board format version must match what the embedded footprints were written
-  // for, or KiCad refuses the file outright.
-  root.items.push(node("version", num(board.version)));
+  // Always the format loon writes today, not whatever the board was loaded at.
+  // A board stamped with an older version opens with an upgrade prompt, and the
+  // embedded footprints have to be written for the same version.
+  root.items.push(node("version", num(KICAD_PCB_VERSION)));
   root.items.push(node("generator", str("loon")));
-  root.items.push(node("generator_version", str("1.0")));
+  root.items.push(node("generator_version", str("10.0")));
 
   const layerCount = board.rules.layers;
   const general = list(sym("general"), node("thickness", num(1.6)), node("legacy_teardrops", sym("no")));
@@ -360,7 +362,7 @@ export function serializeProject(board: Board, name: string): string {
         track_widths: [0, r.minTrackWidth, 0.25, 0.5, 1.0, 2.0],
         via_dimensions: [{ diameter: 0.6, drill: r.minDrill }],
       } },
-      meta: { filename: `${name}.kicad_pro`, version: 3 },
+      meta: { filename: `${name}.kicad_pro`, version: KICAD_PRO_VERSION },
       net_settings: {
         classes: [
           {
@@ -378,9 +380,10 @@ export function serializeProject(board: Board, name: string): string {
             schematic_color: "rgba(0, 0, 0, 0.000)",
             wire_width: 6,
             bus_width: 12,
+            priority: 2147483647,
           },
         ],
-        meta: { version: 3 },
+        meta: { version: KICAD_NET_SETTINGS_VERSION },
       },
       sheets: [],
       text_variables: {},

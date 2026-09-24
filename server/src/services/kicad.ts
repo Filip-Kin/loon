@@ -4,8 +4,9 @@
 // engine OSH Park's own processing uses.
 
 import { storage } from "./storage";
+import { KICAD_IMAGE } from "@loon/shared/kicad-version";
 
-const IMAGE = process.env.LOON_KICAD_IMAGE ?? "ghcr.io/kicad/kicad:9.0";
+const IMAGE = process.env.LOON_KICAD_IMAGE ?? KICAD_IMAGE;
 const DOCKER = process.env.LOON_DOCKER_BIN ?? "docker";
 
 export interface KicadViolation {

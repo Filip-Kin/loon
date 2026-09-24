@@ -1,3 +1,4 @@
+export * from "./kicad-version";
 export * from "./sexpr";
 export * from "./schematic";
 export * from "./geometry";

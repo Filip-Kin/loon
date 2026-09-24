@@ -63,4 +63,12 @@ scripts/  selftest and apitest
 ```
 bun run scripts/selftest.ts            # core codec + ops + module expansion
 bun run scripts/apitest.ts --ai        # full API path incl. the claude bridge
+bun run scripts/kicadtest.ts <project> # every KiCad call, against the pinned container
 ```
+
+### KiCad
+
+loon writes KiCad 10 files and runs `ghcr.io/kicad/kicad:10.0` for DRC,
+autorouting, zone fills and renders. Every version number that has to match the
+container lives in `shared/src/kicad-version.ts`; `scripts/kicadtest.ts` checks
+them and the whole KiCad surface against a real project.
