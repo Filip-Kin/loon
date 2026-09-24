@@ -61,19 +61,31 @@ const GROUPS: Group[] = [
 // Connectors: centre, rotation, and which edge they face. Rotation is applied
 // after the group move so the jack opening points off the board.
 const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotation?: number }[] = [
-  { ref: "J6", at: { x: 16, y: 11 }, face: "N" }, // laptop RJ45, top left
-  { ref: "J3", at: { x: 31, y: 8 }, face: "N" }, // laptop DC out
   { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
   { ref: "J11", at: { x: 82, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
   { ref: "J8", at: { x: 66, y: 13 }, face: "N", rotation: 90 }, // fan (internal)
-  { ref: "J1", at: { x: 96, y: 28 }, face: "E" }, // USB-C PD in (SMD receptacle), upper
-  { ref: "J2", at: { x: 92, y: 68 }, face: "E" }, // DC in, lower
   // Side-emitting LEDs at the wall, beside the ports they describe. Their
   // rotation is a guess until the lens direction is checked in KiCad's 3D view.
   { ref: "D30", at: { x: 98, y: 48 }, face: "E", rotation: 90 }, // power LED between J2 and J1
   { ref: "D31", at: { x: 30, y: 128 }, face: "S", rotation: 0 }, // radio LED beside J5
-  { ref: "J5", at: { x: 16, y: 117 }, face: "S" }, // radio RJ45, bottom left
 ];
+
+// Jacks sit with their front face at the board edge, opening outward. Each
+// land pattern says which of its axes is the front (from its outline: the RJ45
+// body runs to +Y, the barrel jack to +X, the USB-C receptacles to +Y).
+const FLUSH: { ref?: string; libMatch?: RegExp; edge: "N" | "E" | "S" | "W"; along: number; front: "+x" | "+y"; overhang: number }[] = [
+  { ref: "J6", edge: "N", along: 16, front: "+y", overhang: 0.8 }, // laptop RJ45
+  { ref: "J3", edge: "N", along: 32, front: "+x", overhang: 0 }, // laptop DC out
+  { libMatch: /USB_C_Receptacle_HRO|USB_C_Receptacle_GCT/, edge: "N", along: 50, front: "+y", overhang: 0.8 }, // serial USB-C
+  { ref: "J1", edge: "E", along: 28, front: "+y", overhang: 0.8 }, // USB-C PD in
+  { ref: "J2", edge: "E", along: 68, front: "+x", overhang: 0 }, // DC in
+  { ref: "J5", edge: "S", along: 16, front: "+y", overhang: 0.8 }, // radio RJ45
+];
+// Rotation that turns a footprint's front axis toward an edge (loon's rotation sense).
+const FRONT_ROT: Record<"+x" | "+y", Record<"N" | "E" | "S" | "W", number>> = {
+  "+y": { N: 180, E: 270, S: 0, W: 90 },
+  "+x": { N: 270, E: 0, S: 90, W: 180 },
+};
 
 // #region helpers
 function sizeOf(fp?: Footprint, rotation = 0) {
@@ -158,7 +170,7 @@ const unassigned = board.footprints.filter((f) => !groupOf.has(f.ref) && !/^H\d+
 if (unassigned.length) console.log("unassigned:", unassigned.join(" "));
 
 // #region fixed parts first: connectors, cells, holes
-const connectorRefs = new Set([...CONNECTORS.map((c) => c.ref)]);
+const connectorRefs = new Set<string>([...CONNECTORS.map((c) => c.ref)]);
 const placeAtCentre = (f: PlacedFootprint, centre: Point, rotation: number) => {
   const fp = fpOf(f);
   f.rotation = rotation;
@@ -172,9 +184,19 @@ for (const c of CONNECTORS) {
   if (!f) { console.log(`no connector ${c.ref}`); continue; }
   placeAtCentre(f, sc(c.at), c.rotation ?? faceRotation(fpOf(f), NORMAL[c.face]));
 }
-{
-  const usb = board.footprints.find((f) => /USB_C_Receptacle/.test(f.libId));
-  if (usb) placeAtCentre(usb, { x: 50, y: 4 }, faceRotation(fpOf(usb), NORMAL.N));
+for (const c of FLUSH) {
+  const f = c.ref ? board.footprints.find((x) => x.ref === c.ref) : board.footprints.find((x) => c.libMatch!.test(x.libId) && !connectorRefs.has(x.ref));
+  if (!f) { console.log(`no flush part for ${c.ref ?? c.libMatch}`); continue; }
+  const fp = fpOf(f);
+  const box = fp.bbox;
+  const d = c.front === "+y" ? box.max.y : box.max.x; // front face distance from the origin
+  f.rotation = FRONT_ROT[c.front][c.edge];
+  const o = c.overhang;
+  if (c.edge === "N") f.at = { x: c.along, y: +(d - o).toFixed(2) };
+  if (c.edge === "S") f.at = { x: c.along, y: +(H - d + o).toFixed(2) };
+  if (c.edge === "E") f.at = { x: +(W - d + o).toFixed(2), y: c.along };
+  if (c.edge === "W") f.at = { x: +(d - o).toFixed(2), y: c.along };
+  connectorRefs.add(f.ref);
 }
 // Cells: 2 x 2 on the back, long axis along Y, between the top and bottom
 // connectors' pins.
@@ -202,17 +224,7 @@ holes.forEach((h, i) => { if (corners[i]) h.at = corners[i]; });
 type R = { x1: number; y1: number; x2: number; y2: number };
 const taken: R[] = [];
 const EDGE = 2;
-for (const f of board.footprints) {
-  if (!connectorRefs.has(f.ref) && !/USB_C_Receptacle/.test(f.libId)) continue;
-  // A jack body may hang past the edge by design (the plug face), but not by
-  // more than 1 mm: shift it back in.
-  const r = rectOf(f, fpOf(f));
-  const dx = r.x1 < -1 ? -1 - r.x1 : r.x2 > W + 1 ? W + 1 - r.x2 : 0;
-  const dy = r.y1 < -1 ? -1 - r.y1 : r.y2 > H + 1 ? H + 1 - r.y2 : 0;
-  if (dx || dy) { f.at = { x: +(f.at.x + dx).toFixed(2), y: +(f.at.y + dy).toFixed(2) }; console.log(`nudged ${f.ref} by (${dx.toFixed(1)}, ${dy.toFixed(1)})`); }
-}
-for (const c of CONNECTORS) { const f = board.footprints.find((x) => x.ref === c.ref); if (f) taken.push(rectOf(f, fpOf(f))); }
-{ const usb = board.footprints.find((f) => /USB_C_Receptacle/.test(f.libId)); if (usb) taken.push(rectOf(usb, fpOf(usb))); }
+for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref); if (f) taken.push(rectOf(f, fpOf(f))); }
 for (const h of holes) taken.push({ x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2: h.at.x + 3.5, y2: h.at.y + 3.5 });
 for (const p of cellPads) taken.push({ x1: p.x - 2, y1: p.y - 2, x2: p.x + 2, y2: p.y + 2 });
 const hits = (r: R) => taken.some((t) => r.x1 < t.x2 && r.x2 > t.x1 && r.y1 < t.y2 && r.y2 > t.y1);
@@ -266,7 +278,7 @@ for (const g of GROUPS) {
 const rats = ratsnest(board, footprints);
 const drc = runDrc(board, footprints, rats.length);
 const overlaps = drc.filter((d) => d.rule === "overlap");
-const outside = board.footprints.filter((f) => { const r = rectOf(f, fpOf(f)); return r.x1 < -1.2 || r.y1 < -1.2 || r.x2 > W + 1.2 || r.y2 > H + 1.2; });
+const outside = board.footprints.filter((f) => { const r = rectOf(f, fpOf(f)); return r.x1 < -1.5 || r.y1 < -1.5 || r.x2 > W + 1.5 || r.y2 > H + 1.5; });
 console.log(`ratsnest ${rats.length}, overlaps ${overlaps.length}, off-board ${outside.map((f) => f.ref).join(",") || "none"}`);
 for (const o of overlaps.slice(0, 30)) console.log("  overlap:", o.message);
 
