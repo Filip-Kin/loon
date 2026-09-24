@@ -17,7 +17,7 @@ const dirtyRefs = di > 0 ? process.argv[di + 1].split(",") : [];
 const board = JSON.parse(await storage.readFile(project, "board.loon.json")) as Board;
 const plan = defaultNetClassPlan(board);
 await writeNetClasses(project, "", plan);
-console.log(`net classes: Heavy ${plan.heavy?.length ?? 0} (2.5 mm), Wide ${plan.wide?.length ?? 0} (2.0), Power ${plan.power.length} (1.0), Ethernet ${plan.ethernet?.length ?? 0}`);
+console.log(`net classes: Heavy ${plan.heavy?.length ?? 0} (1.5 mm), Wide ${plan.wide?.length ?? 0} (1.2), Power ${plan.power.length} (0.6), Ethernet ${plan.ethernet?.length ?? 0}`);
 const r = await routeWithFreerouting(project, "", { passes, keepTracks, dirtyRefs, routeGnd, importOnly });
 console.log(`${r.ok ? "OK" : "NOT CLEAN"}: ${r.tracks} tracks, ${r.vias} vias, ${r.open} open, DRC ${r.drcViolations} violations / ${r.drcUnconnected} unconnected, ${r.seconds.toFixed(0)} s`);
 for (const n of r.notes) console.log("  " + n);

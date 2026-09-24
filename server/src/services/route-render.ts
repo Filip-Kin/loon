@@ -147,9 +147,11 @@ const kicadPy = (dir: string, script: string, extra: string[] = []) =>
 // Which nets get wide copper. A rail is anything that carries the load; the
 // names are loon's conventions plus whatever the caller adds.
 export interface NetClassPlan {
-  heavy?: string[];   // 2.5 mm: the input bus and anything carrying 5 A
-  wide?: string[];    // 2.0 mm: a 3 A rail
-  power: string[];    // 1.0 mm
+  // Widths are for 2 oz outer copper (JLC option): 1.5 mm carries 5 A at
+  // about 10 C rise, 1.2 mm 3 A, 0.6 mm 1 A.
+  heavy?: string[];   // 1.5 mm: the input bus and anything carrying 5 A
+  wide?: string[];    // 1.2 mm: a 3 A rail
+  power: string[];    // 0.6 mm
   logic?: string[];
   ethernet?: string[];
 }
@@ -177,9 +179,9 @@ export async function writeNetClasses(project: string, unit: string, plan: NetCl
     def,
     // One clearance everywhere: the router and DRC must agree, and a wider
     // class clearance only shows up as DRC errors against the narrow one.
-    { ...def, name: "Heavy", track_width: 2.5, clearance: 0.18, via_diameter: 1.2, via_drill: 0.6 },
-    { ...def, name: "Wide", track_width: 2.0, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
-    { ...def, name: "Power", track_width: 1.0, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
+    { ...def, name: "Heavy", track_width: 1.5, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
+    { ...def, name: "Wide", track_width: 1.2, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
+    { ...def, name: "Power", track_width: 0.6, clearance: 0.18, via_diameter: 0.8, via_drill: 0.4 },
     { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
     { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
   ];
@@ -310,25 +312,16 @@ print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconn
   const m = imp.out.match(/result (\d+) (\d+) (\d+)/);
   const tracks = m ? Number(m[1]) : 0, vias = m ? Number(m[2]) : 0, open = m ? Number(m[3]) : 0;
   if (!m) notes.push(`import failed: ${imp.out.trim().split("\n").slice(-3).join(" | ")}`);
-  // Any GND pad the pour left on its own (KiCad's DRC lists them) gets a
-  // via beside it and a stub, so the other side's pour picks it up; then
-  // fill again and ask DRC again. Two rounds.
+  // A GND pour region that a pad keeps alive but nothing joins to the rest
+  // of the net gets a via inside it, so the other side's pour picks it up;
+  // then fill again. Three rounds, inside one KiCad session.
   if (!o.routeGnd && m) {
-    let added = 0;
-    for (let round = 0; round < 2; round++) {
-      prog.set({ stage: "drc", fraction: 0.96 + round * 0.01, etaSeconds: 60 });
-      const gndPads = await unconnectedGndPads(project, unit);
-      if (round === 0) notes.push(`GND ends without ground after the fill: ${gndPads.length}`);
-      if (!gndPads.length) break;
-      const st = await kicadPy(dir, stitchScript(gndPads));
-      const sm = st.out.match(/stitched (\d+) of (\d+)/);
-      if (!sm) { notes.push(`GND stitching failed: ${st.out.trim().split("\n").pop()}`); break; }
-      added += Number(sm[1]);
-      if (Number(sm[1]) === 0) break;
-    }
-    if (added) notes.push(`GND stitching: ${added} vias added`);
+    prog.set({ stage: "drc", fraction: 0.965, etaSeconds: 60 });
+    const st = await kicadPy(dir, STITCH_SCRIPT);
+    const sm = st.out.match(/stitched (\d+) vias, (\d+) regions left/);
+    if (!sm) notes.push(`GND stitching failed: ${st.out.trim().split("\n").pop()}`);
+    else if (Number(sm[1]) || Number(sm[2])) notes.push(`GND stitching: ${sm[1]} vias added, ${sm[2]} cut-off regions left`);
   }
-
   prog.set({ stage: "drc", fraction: 0.98, etaSeconds: 30 });
   const drc = await runDrcJson(project, unit);
   await syncFromKicad(project, unit);
@@ -337,77 +330,80 @@ print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconn
   return { ok, seconds: (Date.now() - t0) / 1000, tracks, vias, open, drcViolations: drc.violations, drcUnconnected: drc.unconnected, drcByRule: drc.byRule, notes };
 }
 
-// GND items KiCad's DRC reports as unconnected: both ends of every open
-// GND link (pads, or track and via ends), by position.
-async function unconnectedGndPads(project: string, unit: string): Promise<{ x: number; y: number }[]> {
-  await runDrcJson(project, unit);
-  const f = join(storage.projectDir(project, unit), "drc.json");
-  if (!existsSync(f)) return [];
-  const d = JSON.parse(await Bun.file(f).text()) as { unconnected_items?: { items: { description: string; pos: { x: number; y: number } }[] }[] };
-  const out: { x: number; y: number }[] = [];
-  const seen = new Set<string>();
-  for (const u of d.unconnected_items ?? []) for (const it of u.items) {
-    if (!/\[GND\]/.test(it.description)) continue;
-    const k = `${it.pos.x},${it.pos.y}`;
-    if (!seen.has(k)) { seen.add(k); out.push(it.pos); }
-  }
-  return out;
-}
-// A via 0.7 mm off each listed pad (first of eight directions with room)
-// and a stub to it, then a fresh fill.
-function stitchScript(pads: { x: number; y: number }[]): string {
-  return `
-import pcbnew, math, json
+// Every filled GND region on a layer other than the largest is cut off from
+// the rest of the net (KiCad keeps it because a pad sits in it). A via inside
+// it, clear of other nets, joins it to the other side's pour.
+const STITCH_SCRIPT = `
+import pcbnew, math
 b = pcbnew.LoadBoard('/work/board.kicad_pcb')
 MM = pcbnew.FromMM
 gnd = b.GetNetcodeFromNetname('GND')
-want = json.loads('${JSON.stringify(pads)}')
-def clear(c, r):
+gz = [z for z in b.Zones() if z.GetNetCode() == gnd]
+R = MM(0.3) + MM(0.25)
+def clear(c):
     for fp in b.GetFootprints():
         for pad in fp.Pads():
             if pad.GetNetCode() == gnd: continue
             sz = pad.GetSize()
-            if (pad.GetPosition() - c).EuclideanNorm() < r + max(sz.x, sz.y) / 2: return False
+            if (pad.GetPosition() - c).EuclideanNorm() < R + max(sz.x, sz.y) / 2: return False
     for t in b.Tracks():
         if t.GetNetCode() == gnd: continue
         if t.GetClass() == 'PCB_VIA':
-            if (t.GetPosition() - c).EuclideanNorm() < r + t.GetWidth() / 2: return False
-        elif pcbnew.SEG(t.GetStart(), t.GetEnd()).Distance(c) < r + t.GetWidth() / 2: return False
+            if (t.GetPosition() - c).EuclideanNorm() < R + t.GetWidth() / 2: return False
+        elif pcbnew.SEG(t.GetStart(), t.GetEnd()).Distance(c) < R + t.GetWidth() / 2: return False
     return True
-done = 0
-for w in want:
-    target = pcbnew.VECTOR2I(MM(w['x']), MM(w['y']))
-    pad = None
-    for fp in b.GetFootprints():
-        for q in fp.Pads():
-            if q.GetNetCode() == gnd and (q.GetPosition() - target).EuclideanNorm() < MM(0.05): pad = q
-    if pad is None:
-        # a track or via end: a via right there ties it to the other side's pour
-        tr = None
-        for t in b.Tracks():
-            if t.GetNetCode() == gnd and t.GetClass() == 'PCB_TRACK' and pcbnew.SEG(t.GetStart(), t.GetEnd()).Distance(target) < MM(0.05): tr = t
-        if tr is None: continue
-        if clear(target, MM(0.3) + MM(0.25)):
-            v = pcbnew.PCB_VIA(b); v.SetPosition(target); v.SetWidth(MM(0.6)); v.SetDrill(MM(0.3)); v.SetNetCode(gnd); v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); b.Add(v)
-            done += 1
-        continue
-    p = pad.GetPosition(); sz = pad.GetSize()
-    d = max(sz.x, sz.y) / 2 + MM(0.7)
-    layer = pcbnew.F_Cu if pad.IsOnLayer(pcbnew.F_Cu) else pcbnew.B_Cu
+def inside(polys, i, c):
+    # the via ring has to sit in the region
     for k in range(8):
         a = k * math.pi / 4
-        c = pcbnew.VECTOR2I(int(p.x + d * math.cos(a)), int(p.y + d * math.sin(a)))
-        if not clear(c, MM(0.3) + MM(0.25)): continue
-        v = pcbnew.PCB_VIA(b); v.SetPosition(c); v.SetWidth(MM(0.6)); v.SetDrill(MM(0.3)); v.SetNetCode(gnd); v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); b.Add(v)
-        t = pcbnew.PCB_TRACK(b); t.SetStart(p); t.SetEnd(c); t.SetWidth(MM(0.4)); t.SetLayer(layer); t.SetNetCode(gnd); b.Add(t)
-        done += 1
-        break
-pcbnew.ZONE_FILLER(b).Fill(b.Zones())
-b.BuildConnectivity()
+        q = pcbnew.VECTOR2I(int(c.x + MM(0.4) * math.cos(a)), int(c.y + MM(0.4) * math.sin(a)))
+        if not polys.Contains(q, i): return False
+    return polys.Contains(c, i)
+def regions():
+    out = []
+    for z in gz:
+        for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
+            if not z.IsOnLayer(layer): continue
+            polys = z.GetFilledPolysList(layer)
+            n = polys.OutlineCount()
+            if n < 2: continue
+            main = max(range(n), key=lambda i: polys.Outline(i).Area())
+            for i in range(n):
+                if i != main: out.append((polys, i))
+    return out
+added = 0
+left = 0
+for rnd in range(3):
+    regs = regions()
+    left = len(regs)
+    if not regs: break
+    got = 0
+    for polys, i in regs:
+        ol = polys.Outline(i)
+        bb = ol.BBox()
+        cands = [bb.Centre()]
+        step = max(1, ol.PointCount() // 16)
+        for k in range(0, ol.PointCount(), step):
+            p = ol.CPoint(k)
+            # pull each vertex toward the box centre a little
+            cands.append(pcbnew.VECTOR2I(int(p.x + (bb.Centre().x - p.x) * 0.3), int(p.y + (bb.Centre().y - p.y) * 0.3)))
+        # a region that already holds a GND via is not reaching the other
+        # side's pour there; another via would not help
+        if any(t.GetClass() == 'PCB_VIA' and t.GetNetCode() == gnd and polys.Contains(t.GetPosition(), i) for t in b.Tracks()): continue
+        for c in cands:
+            if not inside(polys, i, c) or not clear(c): continue
+            if any(t.GetClass() == 'PCB_VIA' and (t.GetPosition() - c).EuclideanNorm() < MM(0.9) for t in b.Tracks()): continue
+            v = pcbnew.PCB_VIA(b); v.SetPosition(c); v.SetWidth(MM(0.6)); v.SetDrill(MM(0.3)); v.SetNetCode(gnd); v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); b.Add(v)
+            got += 1
+            break
+    added += got
+    pcbnew.ZONE_FILLER(b).Fill(b.Zones())
+    b.BuildConnectivity()
+    if got == 0: break
+left = len(regions())
 pcbnew.SaveBoard('/work/board.kicad_pcb', b)
-print('stitched %d of %d' % (done, len(want)))
+print('stitched %d vias, %d regions left' % (added, left))
 `;
-}
 
 async function runDrcJson(project: string, unit: string): Promise<{ violations: number; unconnected: number; byRule: { rule: string; count: number }[] }> {
   const dir = storage.projectDir(project, unit);
