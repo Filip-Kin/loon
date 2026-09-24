@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { join } from "node:path";
 import { layCopper } from "../services/copper";
 import { router, publicProcedure } from "../trpc";
 import { library } from "../services/library";
@@ -12,7 +13,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
-import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad } from "../services/route-render";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad, writeBoardIntoKicad } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -284,6 +285,12 @@ const projectRouter = router({
 
   // Boards inside a project: "" is the main board at the project root.
   boards: publicProcedure.input(z.object({ name: z.string() })).query(({ input }) => storage.boards(input.name)),
+
+  // When the schematic file was last written, so the editor can follow edits
+  // made outside it (a script, KiCad) without a manual reload.
+  mtime: publicProcedure.input(z.object({ name: z.string(), board: z.string().optional() })).query(async ({ input }) => {
+    try { return (await import("node:fs/promises")).stat(join(storage.projectDir(input.name, input.board ?? ""), "board.kicad_sch")).then((s) => s.mtimeMs); } catch { return 0; }
+  }),
 
   createBoard: publicProcedure
     .input(z.object({ name: z.string(), board: z.string() }))
@@ -676,13 +683,17 @@ const pcbRouter = router({
       // does not carry. So the KiCad file is only written while it is loon's.
       let kicadOwned = false;
       try { kicadOwned = /\(generator "pcbnew"\)/.test((await storage.readFile(input.project, "board.kicad_pcb", unit)).slice(0, 300)); } catch { /* no file yet */ }
-      if (!kicadOwned) {
+      let note = "";
+      if (kicadOwned) {
+        const w = await writeBoardIntoKicad(input.project, unit, board);
+        note = `into KiCad's file: ${w.moved} parts moved, ${w.tracks} tracks, ${w.vias} vias${w.skipped.length ? `; not written: ${w.skipped.join(", ")}` : ""}`;
+      } else {
         await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)), unit);
         await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"), unit);
       }
       const rats = ratsnest(board, footprints);
       const drc = runDrc(board, footprints, rats.length);
-      return { ok: true, drc, unrouted: rats.length };
+      return { ok: true, drc, unrouted: rats.length, note };
     }),
 
   // KiCad's own DRC on the saved board: slower, and the one that counts.

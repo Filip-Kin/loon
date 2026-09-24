@@ -183,9 +183,11 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
 
   useEffect(() => { rebase(); }, [rebase, rev]);
 
+  const dragStart = useRef<Board | null>(null);
   const pull = useCallback(async () => {
     try {
       const res = await trpc.pcb.syncFromDisk.mutate({ project, board: unit });
+      past.current = []; future.current = [];
       setBoard(withTextIds(res.board as Board));
       if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
       setDirty(false);
@@ -218,7 +220,17 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   // forgotten Save.
   const latest = useRef<Board | null>(null);
   latest.current = board;
+  // Undo history: every edit pushes the board it replaced. A pull from disk
+  // clears it, since the file it came from is the new truth.
+  const past = useRef<Board[]>([]);
+  const future = useRef<Board[]>([]);
   function edit(next: Board) {
+    if (latest.current && latest.current !== next) {
+      past.current.push(dragStart.current ?? latest.current);
+      if (past.current.length > 200) past.current.shift();
+      future.current = [];
+    }
+    dragStart.current = null;
     setBoard(next);
     setDirty(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -435,7 +447,10 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   function onMouseDown(e: React.MouseEvent) {
     if (!board) return;
     const w = toWorld(e);
+    // Middle button always pans, whatever is under it.
+    if (e.button === 1) { e.preventDefault(); panning.current = { mx: e.clientX, my: e.clientY, vx: view.x, vy: view.y }; return; }
     if (e.button === 2) { endRun(); return; }
+    if (e.button !== 0) return;
 
     if (tool === "track") {
       const hit = padAt(w);
@@ -466,6 +481,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       const at = got.kind === "fp"
         ? board.footprints.find((f) => f.uuid === got.id)!.at
         : (board.texts ?? []).find((t) => t.uuid === got.id)!.at;
+      dragStart.current = board;
       setDrag({ sel: got, from: w, at });
       return;
     }
@@ -490,7 +506,13 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   }
 
   function onMouseUp() {
-    if (drag && latest.current) edit(latest.current);
+    // A click on a part without moving it is a selection, not an edit.
+    if (drag && latest.current && dragStart.current && latest.current !== dragStart.current) {
+      const f0 = drag.sel!.kind === "fp" ? dragStart.current.footprints.find((f) => f.uuid === drag.sel!.id)?.at : undefined;
+      const f1 = drag.sel!.kind === "fp" ? latest.current.footprints.find((f) => f.uuid === drag.sel!.id)?.at : undefined;
+      if (!f0 || !f1 || f0.x !== f1.x || f0.y !== f1.y) edit(latest.current);
+    }
+    dragStart.current = null;
     setDrag(null);
     panning.current = null;
   }
@@ -502,6 +524,28 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     const sx = flip ? boardW - before.x : before.x;
     setView({ scale, x: e.clientX - r.left - sx * scale, y: e.clientY - r.top - before.y * scale });
   }
+
+  useEffect(() => {
+    function undo() {
+      const prev = past.current.pop();
+      if (!prev || !latest.current) return;
+      future.current.push(latest.current);
+      setBoard(prev); setDirty(true);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => { save(true); }, 1200);
+    }
+    function redo() {
+      const next = future.current.pop();
+      if (!next || !latest.current) return;
+      past.current.push(latest.current);
+      setBoard(next); setDirty(true);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => { save(true); }, 1200);
+    }
+    window.addEventListener("loon:pcb-undo", undo);
+    window.addEventListener("loon:pcb-redo", redo);
+    return () => { window.removeEventListener("loon:pcb-undo", undo); window.removeEventListener("loon:pcb-redo", redo); };
+  });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -637,6 +681,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
         className="pcbcanvas"
         onWheel={onWheel}
         onMouseDown={onMouseDown}
+        onAuxClick={(e) => e.preventDefault()}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}

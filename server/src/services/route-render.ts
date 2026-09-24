@@ -552,6 +552,50 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   return { tracks: tracks.length, vias: vias.length, filled, moved, added, dropped, texts: texts.length };
 }
 
+// #region write back into a KiCad-owned board
+// Once KiCad has saved the board it owns the file: footprints loon never
+// fetched, zones, arcs and settings live there only. An edit made in loon's
+// layout view goes back as a patch: footprint positions and rotations matched
+// by reference, and the straight tracks and vias replaced by loon's set (they
+// came from this file through syncFromKicad, so nothing is lost). Everything
+// else is left byte for byte.
+export async function writeBoardIntoKicad(project: string, unit: string, board: Board): Promise<{ moved: number; tracks: number; vias: number; skipped: string[] }> {
+  let text = await storage.readFile(project, "board.kicad_pcb", unit);
+  const byRef = new Map(board.footprints.map((f) => [f.ref, f]));
+  const n = (v: number) => String(+v.toFixed(4));
+  let moved = 0;
+  const skipped: string[] = [];
+  text = text.replace(/\n\t\(footprint "[^"]*"\n[\s\S]*?\n\t\)/g, (block) => {
+    const ref = block.match(/\(property "Reference" "([^"]*)"/)?.[1];
+    const f = ref ? byRef.get(ref) : undefined;
+    const at = block.match(/\n\t\t\(at (-?[\d.]+) (-?[\d.]+)(?: (-?[\d.]+))?\)/);
+    if (!f || !at) return block;
+    const side = /\n\t\t\(layer "B\./.test(block) ? "B" : "F";
+    if (side !== f.side) { skipped.push(`${ref} (side change: do it in KiCad)`); return block; }
+    const x = +at[1], y = +at[2], r = +(at[3] ?? 0);
+    const rot = ((f.rotation % 360) + 360) % 360;
+    if (Math.abs(x - f.at.x) < 1e-4 && Math.abs(y - f.at.y) < 1e-4 && Math.abs(((r % 360) + 360) % 360 - rot) < 1e-3) return block;
+    moved++;
+    const head = `\n\t\t(at ${n(f.at.x)} ${n(f.at.y)}${rot ? ` ${n(rot)}` : ""})`;
+    const i = block.indexOf(at[0]);
+    let rest = block.slice(i + at[0].length);
+    const d = rot - (((r % 360) + 360) % 360);
+    // pad and text angles in the file are absolute: turn them with the part
+    if (Math.abs(d) > 1e-3) rest = rest.replace(/\(at (-?[\d.]+) (-?[\d.]+)(?: (-?[\d.]+))?\)/g, (_m, ax, ay, aa) => `(at ${ax} ${ay} ${n((((+(aa ?? 0) + d) % 360) + 360) % 360)})`);
+    return block.slice(0, i) + head + rest;
+  });
+  // copper: loon's tracks and vias in place of the file's
+  const first = text.search(/\n\t\((segment|via)\n/);
+  text = text.replace(/\n\t\((segment|via)\n[\s\S]*?\n\t\)/g, "");
+  const seg = (t: Track) => `\n\t(segment\n\t\t(start ${n(t.start.x)} ${n(t.start.y)})\n\t\t(end ${n(t.end.x)} ${n(t.end.y)})\n\t\t(width ${n(t.width)})\n\t\t(layer "${t.layer}")\n\t\t(net "${t.net ?? ""}")\n\t\t(uuid "${t.uuid || crypto.randomUUID()}")\n\t)`;
+  const via = (v: Via) => `\n\t(via\n\t\t(at ${n(v.at.x)} ${n(v.at.y)})\n\t\t(size ${n(v.size)})\n\t\t(drill ${n(v.drill)})\n\t\t(layers "F.Cu" "B.Cu")\n\t\t(net "${v.net ?? ""}")\n\t\t(uuid "${v.uuid || crypto.randomUUID()}")\n\t)`;
+  const copper = board.tracks.map(seg).join("") + (board.vias ?? []).map(via).join("");
+  const at = first >= 0 ? Math.min(first, text.length) : text.search(/\n\t\(zone\n/) >= 0 ? text.search(/\n\t\(zone\n/) : text.lastIndexOf("\n)");
+  text = text.slice(0, at) + copper + text.slice(at);
+  await storage.writeFile(project, "board.kicad_pcb", text, unit);
+  return { moved, tracks: board.tracks.length, vias: (board.vias ?? []).length, skipped };
+}
+
 // #region disk watch
 // KiCad saves board.kicad_pcb behind loon's back. The editor polls this and
 // pulls the file in when it is newer than loon's own model of it.

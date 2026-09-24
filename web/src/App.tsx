@@ -54,6 +54,10 @@ export function App() {
   const [checking, setChecking] = useState(false);
   const [highlightNet, setHighlightNet] = useState<string | null>(null);
   const [view, setView] = useState<View>("schematic");
+  const viewRef = useRef<View>("schematic");
+  viewRef.current = view;
+  // mtime of the schematic as last loaded or saved here; newer on disk = someone else wrote it
+  const schBase = useRef(0);
   // Which view is showing, chosen from the bottom bar on a phone and the top
   // bar on a desktop.
   const [viewMenu, setViewMenu] = useState(false);
@@ -138,6 +142,9 @@ export function App() {
     commit(next);
   }
 
+  // Undo belongs to the view on screen: the layout keeps its own history.
+  function doUndo() { if (viewRef.current === "pcb") window.dispatchEvent(new Event("loon:pcb-undo")); else undo(); }
+  function doRedo() { if (viewRef.current === "pcb") window.dispatchEvent(new Event("loon:pcb-redo")); else redo(); }
   function undo() {
     const p = past.current.pop();
     if (!p || !schem) return;
@@ -183,6 +190,7 @@ export function App() {
   }
 
   async function openProject(name: string, board = "") {
+    schBase.current = await trpc.project.mtime.query({ name, board }).catch(() => 0);
     const res = await trpc.project.load.query({ name, board });
     past.current = []; future.current = [];
     skipAutosave.current = true;
@@ -340,6 +348,27 @@ export function App() {
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [schem, projectName, boardName]);
 
+  // Follow edits made outside the editor (a script, KiCad): reload the sheet
+  // when the file is newer than what is on screen and nothing here is unsaved.
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (saveStateRef.current !== "saved" || saving.current) return;
+      try {
+        const m = await trpc.project.mtime.query({ name: projectName, board: boardName });
+        if (m > schBase.current + 1) {
+          const res = await trpc.project.load.query({ name: projectName, board: boardName });
+          schBase.current = m;
+          skipAutosave.current = true;
+          setSchem(res.schem);
+          setBoardRev((r) => r + 1);
+        }
+      } catch { /* offline */ }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [projectName, boardName]);
+
   async function autosave() {
     const { name, schem: cur, board } = latest.current;
     if (!cur) return;
@@ -348,6 +377,7 @@ export function App() {
     setSaveState("saving");
     try {
       await trpc.project.save.mutate({ name, schem: cur, board });
+      schBase.current = await trpc.project.mtime.query({ name, board }).catch(() => schBase.current);
       setSavedAt(Date.now());
       setSaveState(pendingSave.current ? "dirty" : "saved");
     } catch (e: any) {
@@ -384,8 +414,8 @@ export function App() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); return; }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); doRedo(); return; }
       if (e.key === "Escape") { setNavOpen(false); setViewMenu(false); setTool("select"); setPlacingLibId(null); return; }
       if (e.key.toLowerCase() === "w") { setTool("wire"); return; }
       if (e.key.toLowerCase() === "v") { setTool("select"); return; }
@@ -481,8 +511,8 @@ export function App() {
           onClick={() => setSidebars((s) => ({ ...s, right: !s.right }))}
         >Assistant</button>
         <button className="desktop-only" onClick={() => { fittedFor.current = ""; setSchem((s) => (s ? { ...s } : s)); }} title="Fit the whole sheet">Fit</button>
-        <button className="desktop-only" onClick={undo}>Undo</button>
-        <button className="desktop-only" onClick={redo}>Redo</button>
+        <button className="desktop-only" onClick={doUndo}>Undo</button>
+        <button className="desktop-only" onClick={doRedo}>Redo</button>
         <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "Loading…"}</span>
         </div>
       </div>
