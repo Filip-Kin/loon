@@ -12,7 +12,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
-import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress } from "../services/route-render";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -704,6 +704,22 @@ const pcbRouter = router({
       const report = await routeWithFreerouting(input.project, unit, { passes: input.passes ?? 30, keepTracks: input.keepTracks, dirtyRefs: input.dirtyRefs });
       const routed = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       return { report, board: routed };
+    }),
+
+  // When board.kicad_pcb and loon's own model of it were last written. The
+  // editor polls this so a save from the user's own KiCad shows up here.
+  diskState: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .query(({ input }) => boardDiskState(input.project, input.board ?? "")),
+
+  // Pull board.kicad_pcb back in: copper, placement and silkscreen.
+  syncFromDisk: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const unit = input.board ?? "";
+      const note = await syncFromKicad(input.project, unit);
+      const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
+      return { board, note };
     }),
 
   // Where the current (or last) route run is; polled by the editor's bar.

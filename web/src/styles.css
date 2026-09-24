@@ -60,8 +60,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .savestate.dirty { color: #d8b24a; }
 .savestate.error { color: #ffb4b4; }
 .topbar .status { color: var(--text-dim); font-size: 12px; }
+.topbar button.on { border-color: var(--accent); color: #fff; }
 
 .workspace { display: grid; grid-template-columns: 260px 1fr 320px; height: 100%; min-height: 0; }
+.workspace.no-left { grid-template-columns: 1fr 320px; }
+.workspace.no-right { grid-template-columns: 260px 1fr; }
+.workspace.no-left.no-right { grid-template-columns: 1fr; }
 
 .panel { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .panel.right { border-right: none; border-left: 1px solid var(--line); }
@@ -155,7 +159,7 @@ svg.canvas.panning { cursor: grabbing; }
 .linkbtn { font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 7px; color: var(--text); text-decoration: none; }
 .linkbtn:hover { background: var(--panel-2); }
 .drclist { max-height: 150px; overflow: auto; border-top: 1px solid var(--line); }
-.pcbhint { padding: 6px 10px; font-size: 11.5px; color: var(--text-faint); border-top: 1px solid var(--line); }
+.pcbhint { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 10px; font-size: 11.5px; color: var(--text-faint); border-top: 1px solid var(--line); }
 
 .codeview { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .codebar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -246,13 +250,27 @@ svg.canvas.panning { cursor: grabbing; }
   font-size: 12px;
   z-index: 5;
 }
+.layerpanel.shut { width: auto; min-width: 140px; padding-bottom: 8px; }
 .layerhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-weight: 600;
   color: #d8d8d8;
   padding-bottom: 6px;
   border-bottom: 1px solid #2a2f39;
   margin-bottom: 6px;
+  cursor: grab;
+  user-select: none;
 }
+.layerpanel.shut .layerhead { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.layerhead:active { cursor: grabbing; }
+.layerhead .collapse {
+  font-size: 13px; line-height: 1; padding: 1px 7px; cursor: pointer;
+  background: #232833; border: 1px solid #333a47; border-radius: 4px; color: #d8d8d8;
+}
+.layerbody { max-height: 48vh; overflow-y: auto; }
 .layerrow {
   display: flex;
   align-items: center;
@@ -281,8 +299,28 @@ svg.canvas.panning { cursor: grabbing; }
 .routebar { position: relative; height: 22px; border-bottom: 1px solid var(--line); background: var(--panel, #f4f4f4); overflow: hidden; }
 .routebar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent, #3b82f6); opacity: 0.35; transition: width 0.6s; }
 .routebar-text { position: relative; display: block; padding: 3px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.renders { display: flex; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.renders img { height: 140px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+/* Renders are their own pane, reached from the bar, not a strip over the board. */
+.renderpane { flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; gap: 14px; padding: 14px; align-content: flex-start; }
+.renderpane figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.renderpane img { max-width: min(46vw, 620px); border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
+.renderpane figcaption { font-size: 11.5px; color: var(--text-faint); font-family: ui-monospace, monospace; }
+.renderempty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--text-dim); }
+
+/* board.kicad_pcb moved under us */
+.pcbnote.diskahead { display: flex; align-items: center; gap: 10px; color: #d8b24a; }
+.pcbnote.diskahead button { padding: 3px 9px; font-size: 12px; }
+
+/* Silkscreen editor, over the canvas next to the layer box. */
+.textbox {
+  position: absolute; left: 12px; bottom: 56px; width: 240px; z-index: 6;
+  background: rgba(16, 18, 22, 0.96); border: 1px solid #2a2f39; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.textbox label { display: flex; flex-direction: column; gap: 3px; color: var(--text-dim); flex: 1; }
+.textbox label.checkrow { flex-direction: row; align-items: center; gap: 6px; padding-top: 16px; }
+.textbox .row { display: flex; gap: 8px; }
+.textbox input, .textbox select { width: 100%; padding: 4px 6px; }
+.textbox .layerhead { cursor: default; }
 
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; }
 .lightbox img { max-width: 96vw; max-height: 90vh; border-radius: 4px; background: #fff; }

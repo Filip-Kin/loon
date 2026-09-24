@@ -89,6 +89,8 @@ export const OSHPARK_4LAYER: DesignRules = {
 // Silkscreen text: what the board says about itself. A connector you cannot
 // identify without the schematic is a connector someone will wire backwards.
 export interface BoardText {
+  // Stable across saves, so the file does not churn and the editor has a key.
+  uuid?: string;
   at: Point;
   text: string;
   layer: string; // "F.SilkS" / "B.SilkS"

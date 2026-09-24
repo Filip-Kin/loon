@@ -56,6 +56,16 @@ export function App() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
   const [mobileView, setMobileView] = useState<"design" | "parts" | "panel">("design");
+  // Sidebars fold away, because a board is wider than the gap between them.
+  // Which ones were open is remembered, so the layout survives a reload.
+  const [sidebars, setSidebars] = useState<{ left: boolean; right: boolean }>(() => {
+    try {
+      const raw = localStorage.getItem("loon.sidebars");
+      if (raw) return JSON.parse(raw);
+    } catch { /* first run */ }
+    return { left: true, right: true };
+  });
+  useEffect(() => { try { localStorage.setItem("loon.sidebars", JSON.stringify(sidebars)); } catch {} }, [sidebars]);
 
   const past = useRef<Schematic[]>([]);
   const future = useRef<Schematic[]>([]);
@@ -412,14 +422,27 @@ export function App() {
         {view === "schematic" && <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>}
         {placingLibId && <span className="status">Placing {placingLibId}{isMobile ? " - tap sheet" : " - click sheet (Esc to stop)"}</span>}
         <div className="spacer" />
+        <button
+          className={"desktop-only" + (sidebars.left ? " on" : "")}
+          aria-pressed={sidebars.left}
+          onClick={() => setSidebars((s) => ({ ...s, left: !s.left }))}
+        >Parts</button>
+        <button
+          className={"desktop-only" + (sidebars.right ? " on" : "")}
+          aria-pressed={sidebars.right}
+          onClick={() => setSidebars((s) => ({ ...s, right: !s.right }))}
+        >Assistant</button>
         <button className="desktop-only" onClick={() => { fittedFor.current = ""; setSchem((s) => (s ? { ...s } : s)); }} title="Fit the whole sheet">Fit</button>
         <button className="desktop-only" onClick={undo}>Undo</button>
         <button className="desktop-only" onClick={redo}>Redo</button>
         <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "loading..."}</span>
       </div>
 
-      <div className={"workspace" + (isMobile ? " mobile" : "")} data-view={mobileView}>
-        <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />
+      <div
+        className={"workspace" + (isMobile ? " mobile" : "") + (sidebars.left ? "" : " no-left") + (sidebars.right ? "" : " no-right")}
+        data-view={mobileView}
+      >
+        {(sidebars.left || isMobile) && <PartsPanel parts={parts} placingLibId={placingLibId} onPick={pickPart} />}
 
         <div className="canvas-wrap">
           {view === "code" && <CodeView project={projectName} schem={schem} flash={flash} rev={firmwareRev} board={boardName} />}
@@ -465,6 +488,7 @@ export function App() {
           {toast && <div className={"toast" + (toast.err ? " err" : "")}>{toast.text}</div>}
         </div>
 
+        {(sidebars.right || isMobile) && (
         <div className="panel right">
           <div className="tabs">
             <button className={rightTab === "ai" ? "on" : ""} onClick={() => setRightTab("ai")}>AI</button>
@@ -496,6 +520,7 @@ export function App() {
             />
           )}
         </div>
+        )}
       </div>
 
       {isMobile && (

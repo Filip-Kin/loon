@@ -235,7 +235,7 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
         str(t.text),
         node("at", num(t.at.x), num(t.at.y), num(t.rotation ?? 0)),
         node("layer", str(t.layer)),
-        node("uuid", str(crypto.randomUUID())),
+        node("uuid", str(t.uuid ?? crypto.randomUUID())),
         list(
           sym("effects"),
           list(
