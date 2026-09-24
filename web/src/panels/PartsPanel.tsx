@@ -38,7 +38,7 @@ export function PartsPanel({ parts, placingLibId, onPick }: Props) {
         </div>
       </div>
       <div className="scroll">
-        {filtered.length === 0 && <div className="hint">No parts match. Loosen the source filter.</div>}
+        {filtered.length === 0 && <div className="hint">No matches</div>}
         {filtered.map((p) => (
           <div key={p.id} className={"part-row" + (placingLibId === p.libId ? " active" : "")} onClick={() => onPick(p.libId)}>
             <div className="name">{p.name}{p.priceUsd !== undefined && <span className="price">${p.priceUsd.toFixed(2)}</span>}</div>
@@ -52,7 +52,7 @@ export function PartsPanel({ parts, placingLibId, onPick }: Props) {
           </div>
         ))}
       </div>
-      <div className="hint">Click a part, then click on the sheet to place it. Press W to wire pins, R to rotate, Delete to remove.</div>
+      <div className="hint keys"><span>W wire</span><span>V select</span><span>R rotate</span><span>Del delete</span></div>
     </div>
   );
 }

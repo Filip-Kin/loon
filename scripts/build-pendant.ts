@@ -9,6 +9,7 @@
 import { library } from "../server/src/services/library";
 import { emptySchematic, type Schematic, type SymbolInstance } from "@loon/shared/schematic";
 import { applyOps, autowireSheet, type LibResolver } from "@loon/shared/apply-ops";
+import { compactSheet } from "@loon/shared/compact";
 import { serializeSchematic } from "@loon/shared/kicad-sch";
 import { buildNetlist } from "@loon/shared/netlist";
 import { runErc, formatErc } from "@loon/shared/erc";
@@ -117,6 +118,12 @@ export function buildPendant(): Schematic {
   applyOps(schem, mcuOps, resolve);
 
   // Draw the connections between the blocks, not just inside them.
+  // Pack the sheet before wiring it: the anchors above are spread out so the
+  // blocks cannot collide as they are written, and left that way the sheet is
+  // several A4 pages wide.
+  const packed = compactSheet(schem, (libId) => resolve(libId)?.def ?? schem.libSymbols[libId]);
+  console.log(`compact: ${packed.clusters} blocks, ${packed.before.w}x${packed.before.h} -> ${packed.after.w}x${packed.after.h} mm`);
+
   const wired = autowireSheet(schem, resolve);
   console.log(`autowire: ${wired.drawn} drawn, ${wired.skipped} left joined by name`);
   return schem;

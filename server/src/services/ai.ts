@@ -147,7 +147,8 @@ const OP_SPEC = `Each op is one JSON object. Coordinates are millimetres on a 2.
 - {"op":"add_no_connect","at":{"x":..,"y":..}}
 - {"op":"set_title","title":"..","rev":".."}
 - {"op":"instantiate_module","moduleId":"led_indicator","params":{"supply":"+5V","color":"red","current_ma":10},"at":{"x":120,"y":100}}  (expands a whole sub-circuit; PREFER this when a module fits the request)
-Prefer connect_pins over add_wire. Space parts about 25-40mm apart.
+- {"op":"compact_sheet"}  (packs the sheet: each sub-circuit keeps its own layout and they are re-laid with a small gutter. Run this after adding a whole sub-circuit, and always at the end of a whole-board build.)
+Prefer connect_pins over add_wire. Space parts 10-20mm apart inside a sub-circuit and 40mm between sub-circuits, then compact_sheet; a sheet the user has to scroll across is one they cannot read.
 CRITICAL RULES:
 - Give every add_symbol an explicit unique "ref". Use standard prefixes: R (resistor), C (cap), L (inductor), D (diode/LED), Q (transistor), SW (switch), J (connector), and #PWR01/#PWR02/... for power symbols (GND/+5V/+3V3). Each power symbol instance needs its own #PWRxx.
 - In connect_pins, use exactly the refs you assigned above.
@@ -293,76 +294,41 @@ async function runClaude(prompt: string): Promise<string> {
   return stdout;
 }
 
-// #region firmware authoring
-// Same bridge, different contract: the model returns files, not ops. It gets
-// the generated pin map and the netlist, so the code it writes uses the board's
-// own net names instead of pin numbers it guessed.
-export interface AiFiles {
-  message: string;
-  files: { path: string; content: string }[];
-  raw: string;
-}
-
-function firmwarePrompt(userMessage: string, schem: Schematic, existing: { path: string; content: string }[]): string {
+// #region firmware context
+// What the firmware assistant used to get on its own: the generated pin map,
+// the MCU profile's rules, and the files already in the project. There is one
+// chat box now, so this goes into the one prompt.
+export function firmwareContext(schem: Schematic, existing: { path: string; content: string }[]): string {
   const targets = firmwareTargets(schem, defResolver);
   const t = targets[0];
-  const pinLines = t
-    ? t.pins.map((p) => `- ${p.symbol} = GPIO${p.gpio} (net ${p.net}${p.strapping ? `, STRAPPING: ${p.strapping}` : ""}${p.adc ? `, ADC${p.adc.unit}` : ""})`).join("\n")
-    : "(no MCU wired yet)";
-  const files = existing.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n");
-  return `You are the firmware assistant inside Loon, an electronics design tool. You write firmware for the board the user just designed, in the same document.
-
-OUTPUT CONTRACT: respond with ONLY a single JSON object, no prose, no markdown fences:
-{"message": "<one short sentence>", "files": [{"path": "src/main.cpp", "content": "<the whole file>"}]}
-Paths are relative to the firmware/ folder. Return the COMPLETE content of every file you change. Never return a diff or a fragment.
-Never write include/board_pins.h: it is generated from the schematic and your edits would be overwritten.
-
-TARGET: ${t ? `${t.profile.name} (${t.ref})` : "unknown"}, PlatformIO with the Arduino framework.
-
-PIN MAP (use these constants from "board_pins.h", never a raw GPIO number):
-${pinLines}
-
-PART RULES:
-${t ? t.profile.rules.map((r) => `- ${r}`).join("\n") : ""}
-
-NETS ON THE BOARD:
-${netlistContext(schem)}
-
-BLOCKS:
-${blockContext(schem)}
-
-EXISTING FIRMWARE FILES:
-${files || "(none yet)"}
-
-USER REQUEST:
-${userMessage}
-
-Keep printing a line containing the word KICK on every pass of the main loop, at least four times a second, alongside whatever else you print: the simulator feeds the board's watchdog from that line, so firmware that stops looping correctly trips the e-stop latch in the simulation the same way it would in hardware.
-
-Write firmware that matches what the hardware actually does. If the board has a hardware e-stop latch with a watchdog charge pump, the firmware must keep toggling the kick pin to stay armed and must stop toggling to trip it - do not invent a different mechanism. Remember: output only the JSON object.`;
+  if (!t) return "(no MCU wired yet)";
+  const pinLines = t.pins
+    .map((p) => `- ${p.symbol} = GPIO${p.gpio} (net ${p.net}${p.strapping ? `, STRAPPING: ${p.strapping}` : ""}${p.adc ? `, ADC${p.adc.unit}` : ""})`)
+    .join("\n");
+  return [
+    `TARGET: ${t.profile.name} (${t.ref}), PlatformIO with the Arduino framework.`,
+    "",
+    'PIN MAP (use these constants from "board_pins.h", never a raw GPIO number):',
+    pinLines,
+    "",
+    "PART RULES:",
+    t.profile.rules.map((r) => `- ${r}`).join("\n"),
+    "",
+    "FIRMWARE FILES ALREADY IN THE PROJECT:",
+    existing.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n") || "(none yet)",
+  ].join("\n");
 }
 
-export async function generateFirmware(
+export async function generateOps(
   userMessage: string,
   schem: Schematic,
-  existing: { path: string; content: string }[],
-): Promise<AiFiles> {
-  const raw = await runClaude(firmwarePrompt(userMessage, schem, existing));
-  let t = raw.trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) t = fence[1].trim();
-  const start = t.indexOf("{");
-  const end = t.lastIndexOf("}");
-  if (start >= 0 && end > start) t = t.slice(start, end + 1);
-  const parsed = JSON.parse(t);
-  const files = Array.isArray(parsed.files)
-    ? parsed.files.filter((f: any) => typeof f?.path === "string" && typeof f?.content === "string")
-    : [];
-  return { message: typeof parsed.message === "string" ? parsed.message : "", files, raw };
-}
-
-export async function generateOps(userMessage: string, schem: Schematic, projectState = ""): Promise<AiResult> {
-  const prompt = buildPrompt(userMessage, schem) + (projectState ? `\n\nPROJECT STATE:\n${projectState}\n` : "");
+  projectState = "",
+  firmware: { path: string; content: string }[] = [],
+): Promise<AiResult> {
+  const prompt =
+    buildPrompt(userMessage, schem) +
+    `\n\nFIRMWARE:\n${firmwareContext(schem, firmware)}\n` +
+    (projectState ? `\n\nPROJECT STATE:\n${projectState}\n` : "");
   const raw = await runClaude(prompt);
   const { message, board, ops, files, actions } = extractJson(raw);
   return { message, board, ops, files, actions, raw };

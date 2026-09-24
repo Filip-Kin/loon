@@ -28,6 +28,12 @@ interface Props {
 
 const WIRE = "#4ea1ff";
 const PIN_HIT = 1.6; // mm
+// Zoom range, in screen pixels per millimetre. The floor has to reach the
+// scale a whole generated sheet fits at - a board the size of the radio kiosk
+// loads around 0.3, and a floor above that is a sheet you can never see again.
+export const MIN_SCALE = 0.12;
+export const MAX_SCALE = 40;
+export const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
 export function Canvas(props: Props) {
   const { schem, defs, tool, viewport, setViewport } = props;
@@ -87,7 +93,7 @@ export function Canvas(props: Props) {
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    const newScale = Math.min(40, Math.max(1.5, viewport.scale * factor));
+    const newScale = clampScale(viewport.scale * factor);
     // Keep the point under the cursor fixed.
     const wx = (sx - viewport.x) / viewport.scale;
     const wy = (sy - viewport.y) / viewport.scale;
@@ -175,7 +181,7 @@ export function Canvas(props: Props) {
       setViewport({ ...viewport, x: s.vx + dx, y: s.vy + dy });
     } else if (s.mode === "pinch" && e.touches.length === 2) {
       const factor = touchDist(e.touches) / (s.d0 || 1);
-      const newScale = Math.min(40, Math.max(1.5, s.s0 * factor));
+      const newScale = clampScale(s.s0 * factor);
       const worldX = (s.mx - s.vx) / s.s0;
       const worldY = (s.my - s.vy) / s.s0;
       setViewport({ scale: newScale, x: s.mx - worldX * newScale, y: s.my - worldY * newScale });

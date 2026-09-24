@@ -170,9 +170,6 @@ svg.canvas.panning { cursor: grabbing; }
 .file-row:hover { background: var(--panel-2); }
 .file-row.on { background: rgba(124,58,237,0.18); }
 .editorhost { flex: 1; min-width: 0; overflow: hidden; }
-.askbar { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); }
-.askbar input { flex: 1; }
-.askbar .status { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .buildlog { height: 190px; overflow: auto; margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: #0b0c10; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; color: #b9c0cc; }
 
@@ -196,6 +193,14 @@ svg.canvas.panning { cursor: grabbing; }
 .net-row .count { color: var(--text-faint); }
 
 .hint { padding: 8px 12px; color: var(--text-faint); font-size: 12px; line-height: 1.5; border-top: 1px solid var(--line); }
+.hint.keys { display: flex; flex-wrap: wrap; gap: 12px; }
+.filetree .hint { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-top: none; }
+
+/* Assistant: example prompts instead of a paragraph explaining the box. */
+.examples { display: flex; flex-direction: column; gap: 6px; }
+.exhead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.examples button { text-align: left; font-size: 12.5px; color: var(--text-dim); background: var(--panel-2); }
+.examples button:hover { color: var(--text); }
 .toast { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line-2); padding: 8px 14px; border-radius: 8px; font-size: 13px; }
 .toast.err { border-color: var(--error); color: #ffb4b4; }
 

@@ -3,7 +3,7 @@ import { layCopper } from "../services/copper";
 import { router, publicProcedure } from "../trpc";
 import { library } from "../services/library";
 import { storage } from "../services/storage";
-import { generateOps, generateFirmware } from "../services/ai";
+import { generateOps } from "../services/ai";
 import { probeHub } from "../services/probe-hub";
 import { parseSchematic, serializeSchematic } from "@loon/shared/kicad-sch";
 import { buildNetlist } from "@loon/shared/netlist";
@@ -106,6 +106,22 @@ async function projectState(project: string, schem: Schematic, unit = ""): Promi
   }
   void schem;
   return lines.join("\n");
+}
+
+// Firmware already in the project, for the assistant's context. Capped, because
+// a whole PlatformIO tree is not worth a prompt.
+async function firmwareFiles(project: string, unit = ""): Promise<{ path: string; content: string }[]> {
+  try {
+    const files = await storage.listFiles(project, "firmware", unit);
+    return await Promise.all(
+      files
+        .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
+        .slice(0, 20)
+        .map(async (f) => ({ path: f.path, content: await storage.readFile(project, `firmware/${f.path}`, unit) })),
+    );
+  } catch {
+    return [];
+  }
 }
 
 async function footprintsFor(schem: Schematic): Promise<Record<string, any>> {
@@ -356,9 +372,11 @@ const aiRouter = router({
           job.steps!.push({ label, ok, detail });
         };
         try {
-          job.message = "Thinking about the whole board...";
+          job.message = "Thinking about the whole board…";
           const state = await projectState(project, schem, unit);
-          const ai = await generateOps(input.message, schem, state);
+          // The one assistant writes firmware too, so it gets the files that
+          // are already there along with the schematic.
+          const ai = await generateOps(input.message, schem, state, await firmwareFiles(project, unit));
 
           // A board named in the reply wins over the one on screen, and a board
           // created in this same reply has to exist before its ops land.
@@ -533,43 +551,6 @@ const firmwareRouter = router({
       const job = getBuild(input.id);
       if (!job) return { state: "error" as const, log: "", error: "That build is gone (the server restarted)." };
       return { state: job.state, log: job.log.slice(-20000), error: job.error, artifacts: job.artifacts, elapsedMs: Date.now() - job.started };
-    }),
-
-  // The assistant writes firmware as a job too: it takes as long as a design
-  // edit, and writes whole files rather than ops.
-  aiStart: publicProcedure
-    .input(z.object({ project: z.string(), message: z.string(), schem: z.any(), board: z.string().optional() }))
-    .mutation(({ input }) => {
-      reapJobs();
-      const id = crypto.randomUUID();
-      const job: AiJob = { id, started: Date.now(), state: "running" };
-      aiJobs.set(id, job);
-      (async () => {
-        try {
-          const unit = input.board ?? "";
-          const files = await storage.listFiles(input.project, "firmware", unit);
-          const existing = await Promise.all(
-            files
-              .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
-              .slice(0, 20)
-              .map(async (f) => ({ path: f.path, content: await storage.readFile(input.project, `firmware/${f.path}`, unit) })),
-          );
-          const res = await generateFirmware(input.message, input.schem as Schematic, existing);
-          const written: string[] = [];
-          for (const f of res.files) {
-            if (f.path.includes("board_pins.h")) continue; // generated, never authored
-            await storage.writeFile(input.project, `firmware/${f.path}`, f.content, unit);
-            written.push(f.path);
-          }
-          job.message = `${res.message}${written.length ? ` (wrote ${written.join(", ")})` : ""}`;
-          job.ops = written as unknown[];
-          job.state = "done";
-        } catch (e: any) {
-          job.error = String(e?.message ?? e);
-          job.state = "error";
-        }
-      })();
-      return { id };
     }),
 
   builds: publicProcedure

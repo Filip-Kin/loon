@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "./trpc";
-import { Canvas, type Tool, type Viewport } from "./editor/Canvas";
+import { Canvas, clampScale, type Tool, type Viewport } from "./editor/Canvas";
 import { BlockCanvas } from "./editor/BlockCanvas";
 import { CodeView } from "./editor/CodeView";
 import { PcbCanvas } from "./editor/PcbCanvas";
@@ -260,7 +260,9 @@ export function App() {
     const w = el?.clientWidth ?? window.innerWidth - 600;
     const h = el?.clientHeight ?? window.innerHeight - 120;
     const pad = 24;
-    const scale = Math.min(8, Math.max(0.25, Math.min(w / (max.x - min.x + pad), h / (max.y - min.y + pad))));
+    // The same clamp the wheel uses, so whatever a sheet opens at can be got
+    // back to.
+    const scale = clampScale(Math.min(8, Math.min(w / (max.x - min.x + pad), h / (max.y - min.y + pad))));
     setViewport({ scale, x: w / 2 - ((min.x + max.x) / 2) * scale, y: h / 2 - ((min.y + max.y) / 2) * scale });
   }, [schem, renderDefs, projectName, boardName]);
 

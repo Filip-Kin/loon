@@ -22,6 +22,10 @@ interface FileMeta { path: string; size: number; updated: number }
 // The code view: files on the left, editor in the middle, and the two buttons
 // that matter - build in a container on the server, then flash over USB from
 // the browser. The pin header is generated from the schematic, never typed.
+//
+// There is no chat box here. The assistant in the sidebar writes firmware,
+// syncs the pins and builds it; a second box that did a subset of that was one
+// box too many.
 export function CodeView({ project, schem, flash, rev, board }: Props) {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [path, setPath] = useState<string | null>(null);
@@ -30,8 +34,6 @@ export function CodeView({ project, schem, flash, rev, board }: Props) {
   const [log, setLog] = useState("");
   const [artifacts, setArtifacts] = useState<{ path: string; offset: number }[] | null>(null);
   const [progress, setProgress] = useState<FlashProgress | null>(null);
-  const [ask, setAsk] = useState("");
-  const [askLog, setAskLog] = useState<string | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
@@ -142,7 +144,7 @@ export function CodeView({ project, schem, flash, rev, board }: Props) {
     setBusy("flash");
     try {
       await flashBoard(project, artifacts, setProgress);
-      flash("Flashed. The board is running your firmware.");
+      flash("Flashed");
     } catch (e: any) {
       flash(String(e?.message ?? e), true);
     }
@@ -150,51 +152,24 @@ export function CodeView({ project, schem, flash, rev, board }: Props) {
     setProgress(null);
   }
 
-  // Ask the assistant to write firmware. It gets the pin map and the netlist,
-  // so it writes against the board that exists rather than a guessed pinout.
-  async function askAi() {
-    const text = ask.trim();
-    if (!text || !schem) return;
-    setBusy("ai");
-    setAskLog("Working...");
-    setAsk("");
-    try {
-      const { id } = await trpc.firmware.aiStart.mutate({ project, message: text, schem, board });
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const st: any = await trpc.ai.status.query({ id });
-        if (st.state === "running") continue;
-        if (st.state === "error") throw new Error(st.error ?? "failed");
-        setAskLog(st.message ?? "done");
-        await refreshFiles();
-        if (path) await openFile(path);
-        break;
-      }
-    } catch (e: any) {
-      setAskLog(String(e?.message ?? e));
-      flash(String(e?.message ?? e), true);
-    }
-    setBusy(null);
-  }
-
   const tree = useMemo(() => files.slice().sort((a, b) => a.path.localeCompare(b.path)), [files]);
 
   return (
     <div className="codeview">
       <div className="codebar">
-        <button onClick={sync} disabled={!!busy || !schem}>{busy === "sync" ? "Syncing..." : "Sync pins from schematic"}</button>
+        <button onClick={sync} disabled={!!busy || !schem}>{busy === "sync" ? "Syncing…" : "Sync pins"}</button>
         <button onClick={save} disabled={!dirty || !path}>Save{dirty ? " *" : ""}</button>
-        <button className="primary" onClick={build} disabled={!!busy}>{busy === "build" ? "Building..." : "Build"}</button>
+        <button className="primary" onClick={build} disabled={!!busy}>{busy === "build" ? "Building…" : "Build"}</button>
         <button onClick={doFlash} disabled={!!busy || !artifacts?.length || !canFlash}>
-          {busy === "flash" ? `Flashing ${progress ? Math.round(progress.percent) : 0}%` : "Flash over USB"}
+          {busy === "flash" ? `Flashing ${progress ? Math.round(progress.percent) : 0}%` : "Flash"}
         </button>
-        {!canFlash && <span className="status">Flashing needs WebSerial: Chrome or Edge, not Safari or Firefox.</span>}
+        {!canFlash && <span className="status">Flashing needs WebSerial (Chrome or Edge)</span>}
         <span className="spacer" />
-        <span className="status">{path ?? "no file"}</span>
+        <span className="status">{path ?? "No file"}</span>
       </div>
       <div className="codebody">
         <div className="filetree">
-          {tree.length === 0 && <div className="hint">No firmware yet. Press "Sync pins from schematic" to scaffold it.</div>}
+          {tree.length === 0 && <div className="hint">No firmware yet<button onClick={sync} disabled={!!busy || !schem}>Sync pins</button></div>}
           {tree.map((f) => (
             <div key={f.path} className={"file-row" + (f.path === path ? " on" : "")} onClick={() => openFile(f.path)}>
               {f.path}
@@ -203,19 +178,8 @@ export function CodeView({ project, schem, flash, rev, board }: Props) {
         </div>
         <div className="editorhost" ref={host} />
       </div>
-      <div className="askbar">
-        <input
-          placeholder="Ask for firmware: 'write the e-stop logic with the watchdog kick'"
-          value={ask}
-          onChange={(e) => setAsk(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") askAi(); }}
-          disabled={busy === "ai"}
-        />
-        <button onClick={askAi} disabled={!!busy || !schem}>{busy === "ai" ? "Writing..." : "Write it"}</button>
-        {askLog && <span className="status">{askLog}</span>}
-      </div>
       {(log || busy === "build") && (
-        <pre className="buildlog" ref={logRef}>{log || "starting build..."}</pre>
+        <pre className="buildlog" ref={logRef}>{log || "Building…"}</pre>
       )}
     </div>
   );

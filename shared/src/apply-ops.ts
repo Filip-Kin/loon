@@ -6,6 +6,7 @@
 import type { Schematic, SymbolInstance, LibSymbol, Point } from "./schematic";
 import type { Op, OpResult } from "./ops";
 import { findPin, pinWorld, routeOrthogonal, snapPoint, instanceBBox, PLACE_GRID } from "./geometry";
+import { compactSheet } from "./compact";
 import { MODULES, type ModuleNet } from "./modules";
 import { buildIcSymbol } from "./symbolgen";
 import { buildNetlist } from "./netlist";
@@ -408,6 +409,16 @@ export function applyOp(schem: Schematic, op: Op, resolveBase: LibResolver): OpR
       return res.drawn > 0
         ? { ok: true }
         : { ok: false, error: `nothing could be routed cleanly (${res.skipped} connections left joined by name)` };
+    }
+
+    case "compact_sheet": {
+      const r = compactSheet(schem, (libId) => resolve(libId)?.def ?? schem.libSymbols[libId], {
+        gutter: op.gutter, joinGap: op.joinGap, targetWidth: op.targetWidth,
+      });
+      if (r.clusters === 0) return { ok: false, error: "nothing on the sheet to pack" };
+      // The wires it had to drop are redrawn, so the sheet keeps its copper.
+      if (r.cutWires) autowireSheet(schem, resolveBase);
+      return { ok: true };
     }
 
     case "clear_net": {

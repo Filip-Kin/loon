@@ -11,6 +11,15 @@ interface Props {
   onSend: (text: string) => void;
 }
 
+// The one chat box in the app. It edits the schematic, writes and builds the
+// firmware, places the board and runs the simulators, so no other view needs
+// its own.
+const EXAMPLES = [
+  "Add a 5V buck off the 24V bus",
+  "Write the e-stop firmware and build it",
+  "Lay out the PCB and run DRC",
+];
+
 export function AiPanel({ messages, busy, elapsed, progress, aiAvailable, onSend }: Props) {
   const [text, setText] = useState("");
   function send() {
@@ -22,23 +31,28 @@ export function AiPanel({ messages, busy, elapsed, progress, aiAvailable, onSend
   return (
     <div className="ai">
       <div className="log">
-        {!aiAvailable && <div className="msg err">The local claude binary was not found, so the AI assistant is offline. Set LOON_CLAUDE_BIN or install claude.</div>}
+        {!aiAvailable && <div className="msg err">Assistant offline — no claude binary. Set LOON_CLAUDE_BIN.</div>}
         {messages.length === 0 && aiAvailable && (
-          <div className="msg bot">Ask for anything on this board: "add a 5V buck off the 24V bus", "write the e-stop firmware and build it", "lay out the PCB and run DRC", "boot the firmware and tell me if the watchdog keeps the latch armed". I edit the schematic, write the code, place the board and run the simulators from here.</div>
+          <div className="examples">
+            <div className="exhead">Examples</div>
+            {EXAMPLES.map((e) => (
+              <button key={e} onClick={() => setText(e)}>{e}</button>
+            ))}
+          </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={"msg " + m.role}>{m.text}</div>
         ))}
         {busy && (
           <div className="msg bot">
-            {progress ?? "Working..."} {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
-            {elapsed > 90 && <div style={{ opacity: 0.7, marginTop: 4 }}>A whole-board prompt takes several minutes. This keeps running even if you switch tabs.</div>}
+            {progress ?? "Working…"} {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+            {elapsed > 90 && <div style={{ opacity: 0.7, marginTop: 4 }}>Runs in the background</div>}
           </div>
         )}
       </div>
       <div className="composer">
         <textarea
-          placeholder="Describe what to add or change..."
+          placeholder="Describe what to add or change"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}

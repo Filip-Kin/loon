@@ -10,6 +10,7 @@ import { library } from "../server/src/services/library";
 import { emptySchematic, type Schematic } from "@loon/shared/schematic";
 import { applyOps, type LibResolver } from "@loon/shared/apply-ops";
 import { serializeSchematic } from "@loon/shared/kicad-sch";
+import { compactSheet } from "@loon/shared/compact";
 import { pinWorld, findPin } from "@loon/shared/geometry";
 import type { Op } from "@loon/shared/ops";
 
@@ -103,6 +104,9 @@ const failed = res.results.filter((r) => !r.ok);
 if (failed.length) console.log("wiring issues:", failed.map((f) => f.error).join("; "));
 
 const usedLibIds = Array.from(new Set(schem.symbols.map((s) => s.libId)));
+const packed = compactSheet(schem as Schematic, (libId) => library.get(libId)?.def ?? (schem as Schematic).libSymbols[libId]);
+console.log(`compact: ${packed.clusters} blocks, ${packed.before.w}x${packed.before.h} -> ${packed.after.w}x${packed.after.h} mm`);
+
 const text = serializeSchematic(schem as Schematic, library.rawMap(usedLibIds));
 const dir = process.env.LOON_FS_DIR ?? "/media/nas/filip/ncdata/filip/files/Electronics/loon-projects";
 const path = join(dir, "fonginator.kicad_sch");
