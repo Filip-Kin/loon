@@ -52,10 +52,10 @@ export function defaultNetClassPlan(board: Board): NetClassPlan {
 
 export async function writeNetClasses(project: string, unit: string, plan: NetClassPlan): Promise<void> {
   const pro = JSON.parse(await storage.readFile(project, "board.kicad_pro", unit));
-  const def = pro.net_settings.classes[0];
+  const def = { ...pro.net_settings.classes[0], clearance: 0.2 };
   pro.net_settings.classes = [
     def,
-    { ...def, name: "Power", track_width: 1.0, clearance: 0.25, via_diameter: 0.9, via_drill: 0.5 },
+    { ...def, name: "Power", track_width: 1.0, clearance: 0.2, via_diameter: 0.9, via_drill: 0.5 },
     { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
     { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
   ];
@@ -65,6 +65,18 @@ export async function writeNetClasses(project: string, unit: string, plan: NetCl
     ...(plan.ethernet ?? []).map((n) => ({ netclass: "Ethernet", pattern: n })),
   ];
   await storage.writeFile(project, "board.kicad_pro", JSON.stringify(pro, null, 2), unit);
+}
+
+// Remove nets from a Specctra DSN's (network ...) section so the router leaves
+// them alone. Pads keep their net in KiCad; only Freerouting stops caring.
+async function stripNetsFromDsn(path: string, names: string[]): Promise<void> {
+  let text = await Bun.file(path).text();
+  for (const n of names) {
+    // (net "GND" (pins ...)) or (net GND (pins ...)), possibly multi-line
+    const re = new RegExp(`\\(net\\s+"?${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"?\\s*\\(pins[^()]*(?:\\([^()]*\\)[^()]*)*\\)\\s*\\)`, "g");
+    text = text.replace(re, "");
+  }
+  await Bun.write(path, text);
 }
 
 // #region route
@@ -93,11 +105,16 @@ print('dsn', ok)
 `);
   if (!/dsn True/.test(dsn.out)) return { ok: false, seconds: 0, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [`DSN export failed: ${dsn.out.trim().split("\n").pop()}`] };
 
+  // Ground is the pour on both sides; routing it as tracks wastes the router's
+  // effort and the board's space. Take it out of the DSN's network section.
+  await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
   await run(["chmod", "777", dir], 10000);
   const fr = await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
     "java", "-jar", "/app/freerouting-executable.jar", "--user_data_path=/work/.freerouting", "--gui-enabled=false",
     "-de", "/work/board.dsn", "-do", "/work/board.ses", "-mp", String(passes), "-mt", "8"], 3600000);
-  await run(["rm", "-rf", `${dir}/.freerouting`], 10000);
+  // Freerouting ran as root, so its scratch dir and the SES are root's: clean
+  // up and hand them back the same way.
+  await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, "--entrypoint", "sh", FREEROUTING, "-c", `rm -rf /work/.freerouting; chown ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} /work/board.ses /work/board.dsn 2>/dev/null; true`], 30000);
   if (!existsSync(join(dir, "board.ses"))) return { ok: false, seconds: (Date.now() - t0) / 1000, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [`Freerouting wrote no session: ${fr.out.split("\n").filter((l) => /ERROR|Exception/.test(l)).slice(-2).join(" | ")}`] };
   const frInfo = fr.out.split("\n").filter((l) => /INFO/.test(l) && /rout|pass|complete/i.test(l)).slice(-2).map((l) => l.replace(/^.*INFO\s+/, ""));
   notes.push(...frInfo);

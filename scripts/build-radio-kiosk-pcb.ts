@@ -52,12 +52,12 @@ const GROUPS: Group[] = [
   { name: "bulk", refs: [/^C9[78]$/], at: { x: 13, y: 76 } },
   { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 13, y: 108 } },
   { name: "efuse", refs: [/^U21$/, /^R6[0-3]$/, /^C6[0-2]$/, /^Q13$/], at: { x: 85, y: 55 } },
-  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 84, y: 112 } },
+  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 84, y: 115 } },
   { name: "boost", refs: [/^U20$/, /^Q20$/, /^L20$/, /^D2[01]$/, /^R2[0-5]$/, /^C2[0-5]$/], at: { x: 46, y: 81 } },
-  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 72, y: 81 } },
+  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 84, y: 89 } },
   { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 40, y: 112 } },
   { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 62, y: 111 } },
-  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 90, y: 80 } },
+  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 66, y: 126 } },
   { name: "cells", refs: [/^BT[1-4]$/], at: { x: 52, y: 43 }, side: "B" },
 ];
 
@@ -235,8 +235,8 @@ for (const p of cellPads) taken.push({ x1: p.x - 2, y1: p.y - 2, x2: p.x + 2, y2
 // Ethernet pass-through lane, J6 to J5: nothing else goes here.
 taken.push({ x1: 24, y1: 18, x2: 30, y2: 112 });
 const hits = (r: R) => taken.some((t) => r.x1 < t.x2 && r.x2 > t.x1 && r.y1 < t.y2 && r.y2 > t.y1);
-const GAP = 0.6;
-const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 18, bulk: 14, buck15: 22, buck5: 16, ntc: 8, fan: 12, backup: 20, boost: 30, efuse: 20, pse: 24, port: 8 };
+const GAP = 0.8;
+const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 18, bulk: 14, buck15: 28, buck5: 20, ntc: 8, fan: 12, backup: 20, boost: 30, efuse: 20, pse: 24, port: 8 };
 for (const g of GROUPS) {
   if (g.name === "cells") continue;
   const members = board.footprints.filter((f) => groupOf.get(f.ref) === g && !connectorRefs.has(f.ref) && !/USB_C_Receptacle/.test(f.libId));
@@ -305,10 +305,10 @@ if (!placeOnly) {
   board.vias = [];
   const pours = planPours(board, nl, {
     nets: [
+      // Ground on both sides. Rails go as 1 mm tracks (Power net class): a
+      // bounded rail pour breaks into islands between the parts.
       { name: "GND", layer: "B.Cu", priority: 0 },
       { name: "GND", layer: "F.Cu", priority: 0 },
-      { name: "+12V", layer: "F.Cu", priority: 2, bounds: { x1: 4, y1: 30, x2: 60, y2: 100 } },
-      { name: "VIN", layer: "F.Cu", priority: 2, bounds: { x1: 60, y1: 20, x2: 88, y2: 70 } },
     ],
   });
   board.zones = pours.zones;

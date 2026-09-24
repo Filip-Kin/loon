@@ -280,7 +280,7 @@ const PSMN075: IcSymbolSpec = {
   ],
 };
 
-// STM32F072C8T6, LQFP-48, pin numbers from DocID025004 Table 13 (LQFP48 column).
+// STM32F072CBT6, LQFP-48, pin numbers from DocID025004 Table 13 (LQFP48 column).
 // Crystal-less USB (HSI48) with the ROM DFU bootloader, so the USB-C serial
 // port is also the programmer: hold BOOT0 at reset and it enumerates as DFU.
 const STM32_PINS: { n: number; name: string; t?: IcSymbolSpec["pins"][number]["type"] }[] = [
@@ -298,13 +298,13 @@ const STM32_PINS: { n: number; name: string; t?: IcSymbolSpec["pins"][number]["t
   { n: 45, name: "PB8" }, { n: 46, name: "PB9" }, { n: 47, name: "VSS", t: "power_in" }, { n: 48, name: "VDD", t: "power_in" },
 ];
 const STM32F072: IcSymbolSpec = {
-  libId: "MCU_ST_STM32F0:STM32F072C8T6",
+  libId: "MCU_ST_STM32F0:STM32F072CBT6",
   refPrefix: "U",
-  value: "STM32F072C8T6",
+  value: "STM32F072CBT6",
   description:
-    "STM32F072, Cortex-M0 48 MHz, 64 KB flash, LQFP-48. Crystal-less USB full-speed device with the ROM DFU bootloader, 12-bit ADC. No radio on the board.",
+    "STM32F072, Cortex-M0 48 MHz, 128 KB flash (the C8 at 64 KB left no room: the first firmware was 97% of it), LQFP-48. Crystal-less USB full-speed device with the ROM DFU bootloader, 12-bit ADC. No radio on the board.",
   keywords: "stm32 mcu cortex-m0 usb dfu lqfp48",
-  datasheet: "https://www.st.com/resource/en/datasheet/stm32f072c8.pdf",
+  datasheet: "https://www.st.com/resource/en/datasheet/stm32f072cb.pdf",
   footprint: "Package_QFP:LQFP-48_7x7mm_P0.5mm",
   pins: STM32_PINS.map((p, i) => ({ number: String(p.n), name: p.name, type: p.t ?? "bidirectional", side: i < 24 ? "left" : "right" })),
 };
@@ -882,7 +882,7 @@ export function buildRadioKiosk(): Schematic {
   // battery to talk. Outputs that matter at reset have a pull so a floating
   // GPIO means "off": BOOST_SD up (boost off), TEST_LOAD / FAN / BK_KILL down.
   const mx = 560, my = 330;
-  part("U40", STM32F072.libId, "STM32F072C8T6", mx, my);
+  part("U40", STM32F072.libId, "STM32F072CBT6", mx, my);
   const mcuPins: Record<string, string> = {
     "1": "+3V3", "8": "GND", "9": "MCU_VDDA", "23": "GND", "35": "GND", "47": "GND", "24": "+3V3", "36": "+3V3", "48": "+3V3",
     "7": "MCU_NRST", "44": "MCU_BOOT0",
@@ -997,7 +997,7 @@ export function buildRadioKiosk(): Schematic {
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN) and constant-current limited (LAPTOP_ILIM): firmware sets the limit to allocation minus the box draw so a shared charger never trips; what the Toughbook does when limited is untested (bench supply 15.6 V / 2.5 A). USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PA10 BK_KILL. I2C2 PB10/PB11 reads the CH224A (status, PDO list). In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["MCU: STM32F072CBT6 (128 KB), no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PA10 BK_KILL. I2C2 PB10/PB11 reads the CH224A (status, PDO list). In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
@@ -1051,7 +1051,7 @@ export function buildRadioKiosk(): Schematic {
     Q30: "C20917", // AO3400A (basic)
     J8: "C20079", // XH-2A
     RT1: "C13564", // NCP18XH103F03RB
-    U40: "C80488", // STM32F072C8T6
+    U40: "C2969805", // STM32F072CBT6 (genuine: JLC stock 0, consign from DigiKey; APM32/FCM32 clones in stock are not it)
     U41: "C122228", // INA180A1IDBVR
     U42: "C192764", // INA180A2IDBVR
     U43: "C395459", // LMV321

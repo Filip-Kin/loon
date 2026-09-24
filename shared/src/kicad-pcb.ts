@@ -37,8 +37,41 @@ function setReference(fpNode: SxList, ref: string, value: string) {
   }
 }
 
+// A footprint on the back is stored flipped: every F.* layer becomes B.* and
+// the local X of every coordinate is mirrored, which is the same mirror loon's
+// padWorld applies for side B. Text gets the mirror flag so it reads from
+// the back. Without this KiCad draws the courtyard and silk on the front and
+// reports every back-side part as overlapping its front-side neighbours.
+const LAYER_FLIP: Record<string, string> = {};
+for (const l of ["Cu", "Adhes", "Paste", "SilkS", "Mask", "CrtYd", "Fab"]) { LAYER_FLIP[`F.${l}`] = `B.${l}`; LAYER_FLIP[`B.${l}`] = `F.${l}`; }
+function flipRaw(node: SxList): void {
+  const head = node.items[0]?.kind === "atom" ? node.items[0].value : "";
+  if (head === "layer" || head === "layers") {
+    for (let i = 1; i < node.items.length; i++) {
+      const it = node.items[i];
+      if (it.kind === "atom" && LAYER_FLIP[it.value]) it.value = LAYER_FLIP[it.value];
+    }
+    return;
+  }
+  if (["at", "start", "end", "mid", "center", "xy"].includes(head)) {
+    const x = node.items[1];
+    if (x?.kind === "atom" && !isNaN(Number(x.value))) x.value = String(-Number(x.value));
+    // the rotation of a mirrored item flips sign
+    if (head === "at" && node.items[3]?.kind === "atom" && !isNaN(Number(node.items[3].value))) node.items[3].value = String(-Number(node.items[3].value));
+    return;
+  }
+  if (head === "effects") {
+    let justify = node.items.find((i) => i.kind === "list" && i.items[0]?.kind === "atom" && i.items[0].value === "justify") as SxList | undefined;
+    if (!justify) { justify = list(sym("justify")); node.items.push(justify); }
+    if (!justify.items.some((i) => i.kind === "atom" && i.value === "mirror")) justify.items.push(sym("mirror"));
+    return;
+  }
+  for (const it of node.items) if (it.kind === "list") flipRaw(it);
+}
+
 function emitFootprint(f: PlacedFootprint, raw: SxList | undefined, netIndex: Map<string, number>, minDrill = 0): SxList {
   const fpNode = raw ? (clone(raw) as SxList) : list(sym("footprint"), str(f.libId));
+  if (f.side === "B" && raw) for (const it of fpNode.items) if (it.kind === "list") flipRaw(it);
   // KiCad wants the library id on the footprint node itself.
   fpNode.items[1] = str(f.libId);
   setChild(fpNode, "at", node("at", num(f.at.x), num(f.at.y), num(f.rotation)));

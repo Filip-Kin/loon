@@ -79,6 +79,19 @@ function normalizeKicad9(root: SxList): void {
   if (atom(root.items[0]) === "module") root.items[0] = { kind: "atom", value: "footprint" } as Sx;
   root.items = root.items.filter((it) => !(it.kind === "list" && atom(it.items[0]) === "tedit"));
   root.items = root.items.filter((it) => !(it.kind === "list" && atom(it.items[0]) === "property" && !find(it, "at")));
+  // An unnamed plated hole whose drill equals its pad has no ring to plate:
+  // it is a mechanical peg, and KiCad's DRC says so on every one. Make it NPTH.
+  for (const it of root.items) {
+    if (it.kind !== "list" || atom(it.items[0]) !== "pad") continue;
+    const name = atom(it.items[1]) ?? "";
+    if (name !== "" || atom(it.items[2]) !== "thru_hole") continue;
+    const size = find(it, "size"), drill = find(it, "drill");
+    if (size && drill && Math.abs(numAt(size, 1) - numAt(drill, 1)) < 0.05) {
+      it.items[2] = { kind: "atom", value: "np_thru_hole" } as Sx;
+      const li = it.items.findIndex((x) => x.kind === "list" && atom((x as SxList).items[0]) === "layers");
+      if (li >= 0) it.items[li] = { kind: "list", items: [{ kind: "atom", value: "layers" }, { kind: "atom", value: "*.Cu" }, { kind: "atom", value: "*.Mask" }] } as SxList;
+    }
+  }
   const A = (v: string): Sx => ({ kind: "atom", value: v }) as Sx;
   const L = (...items: Sx[]): SxList => ({ kind: "list", items }) as SxList;
   for (const it of root.items) {
