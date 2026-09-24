@@ -562,8 +562,10 @@ export function buildRadioKiosk(): Schematic {
   part("U50", CH224A.libId, "CH224A", 30, 60);
   label("U50", "1", "VIN_USB");
   label("U50", "8", "VIN_USB");
-  nc("U50", "2"); // CFG2, internal pull-up: single-resistor mode
-  nc("U50", "3"); // CFG3, internal pull-up
+  // CFG2/CFG3 double as I2C (address 0x22): status, granted-level current
+  // and the source's PDO list (regs 0x60-0x8F). Internal pull-ups, 3.3 V ok.
+  label("U50", "2", "PD_SCL");
+  label("U50", "3", "PD_SDA");
   label("U50", "4", "PD_DP");
   label("U50", "5", "PD_DM");
   label("U50", "6", "PD_CC2");
@@ -891,7 +893,8 @@ export function buildRadioKiosk(): Schematic {
     "25": "TEST_LOAD", "26": "BOOST_SD", "27": "PASSIVE_EN", "28": "PSE_EN", // PB12-15
     "16": "FAN_PWM", // PA6 TIM3_CH1
     "29": "LED_DATA", // PA8 TIM1_CH1 (PWM+DMA for the WS2812 stream)
-    "21": "BK_KILL", // PB10
+    "21": "PD_SCL", "22": "PD_SDA", // PB10/PB11 I2C2 to the CH224A
+    "31": "BK_KILL", // PA10
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
     "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
     "42": "UART_TX", "43": "UART_RX", // PB6/PB7 USART1
@@ -994,7 +997,7 @@ export function buildRadioKiosk(): Schematic {
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN) and constant-current limited (LAPTOP_ILIM): firmware sets the limit to allocation minus the box draw so a shared charger never trips; what the Toughbook does when limited is untested (bench supply 15.6 V / 2.5 A). USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PB10 BK_KILL. In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["MCU: STM32F072C8T6, no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PA10 BK_KILL. I2C2 PB10/PB11 reads the CH224A (status, PDO list). In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 

@@ -41,10 +41,10 @@ const GROUPS: Group[] = [
   { name: "usb", refs: [/^J10$/], at: { x: 50, y: 14 } },
   { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 88, y: 13 } },
   { name: "mcu", refs: [/^U40$/, /^C13[0-6]$/, /^R11[12]$/, /^SW[12]$/, /^R26$/, /^R100$/, /^U30$/, /^C110$/, /^R103$/], at: { x: 48, y: 35 } },
-  { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 70, y: 34 } },
-  { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 84, y: 44 } },
-  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 84, y: 55 } },
-  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 70, y: 50 } },
+  { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 84, y: 38 } },
+  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 70, y: 34 } },
+  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 84, y: 50 } },
+  { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 70, y: 52 } },
   { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 13, y: 42 } },
   { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 33, y: 52 } },
   { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 13, y: 78 } },
@@ -66,8 +66,8 @@ const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotatio
   { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
   { ref: "J11", at: { x: 82, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
   { ref: "J8", at: { x: 66, y: 13 }, face: "N", rotation: 90 }, // fan (internal)
-  { ref: "J2", at: { x: 92, y: 30 }, face: "E" }, // DC in
-  { ref: "J1", at: { x: 96, y: 67 }, face: "E" }, // USB-C PD in (SMD receptacle)
+  { ref: "J1", at: { x: 96, y: 28 }, face: "E" }, // USB-C PD in (SMD receptacle), upper
+  { ref: "J2", at: { x: 92, y: 68 }, face: "E" }, // DC in, lower
   // Side-emitting LEDs at the wall, beside the ports they describe. Their
   // rotation is a guess until the lens direction is checked in KiCad's 3D view.
   { ref: "D30", at: { x: 98, y: 48 }, face: "E", rotation: 90 }, // power LED between J2 and J1
