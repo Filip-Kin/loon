@@ -419,6 +419,20 @@ const WS2812B_4020: IcSymbolSpec = {
   ],
 };
 
+const XH3: IcSymbolSpec = {
+  libId: "Connector:Conn_XH_1x03",
+  refPrefix: "J",
+  value: "XH-3A",
+  description: "JST XH 3-pin: 5 V, WS2812 data, GND, for LEDs on the lid (a WS2812 string on a wire, or a small carrier), chained after D31.",
+  keywords: "connector xh led lid",
+  footprint: "LCSC:CONN-TH_XH-3A",
+  pins: [
+    { number: "1", name: "5V", type: "power_in", side: "left" },
+    { number: "2", name: "DATA", type: "input", side: "left" },
+    { number: "3", name: "GND", type: "power_in", side: "left" },
+  ],
+};
+
 const AHCT1G125: IcSymbolSpec = {
   libId: "Logic_LevelTranslator:SN74AHCT1G125",
   refPrefix: "U",
@@ -478,7 +492,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -957,7 +971,12 @@ export function buildRadioKiosk(): Schematic {
   label("D31", "2", "+5V");
   label("D31", "4", "GND");
   label("D31", "1", "LED_D1");
-  nc("D31", "3");
+  label("D31", "3", "LED_D2");
+  // Lid LEDs on a wire: the chain continues out of the box.
+  part("J13", XH3.libId, "Lid LEDs", lx + 130, ly);
+  label("J13", "1", "+5V");
+  label("J13", "2", "LED_D2");
+  label("J13", "3", "GND");
   c("C112", "100n", lx + 100, ly + 16, "+5V", "GND");
 
   // Fan: 2-pin 30 mm on the 12 V rail, low-side AO3400A at 25 kHz PWM, SS14
@@ -1051,6 +1070,7 @@ export function buildRadioKiosk(): Schematic {
     Q30: "C20917", // AO3400A (basic)
     J8: "C20079", // XH-2A
     RT1: "C13564", // NCP18XH103F03RB
+    J13: "C2316", // XH-3A
     U40: "C2969805", // STM32F072CBT6 (genuine: JLC stock 0, consign from DigiKey; APM32/FCM32 clones in stock are not it)
     U41: "C122228", // INA180A1IDBVR
     U42: "C192764", // INA180A2IDBVR

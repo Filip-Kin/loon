@@ -63,8 +63,10 @@ export async function writeNetClasses(project: string, unit: string, plan: NetCl
   const def = { ...pro.net_settings.classes[0], clearance: 0.18 };
   pro.net_settings.classes = [
     def,
-    { ...def, name: "Heavy", track_width: 2.5, clearance: 0.25, via_diameter: 1.2, via_drill: 0.6 },
-    { ...def, name: "Wide", track_width: 2.0, clearance: 0.2, via_diameter: 1.0, via_drill: 0.5 },
+    // One clearance everywhere: the router and DRC must agree, and a wider
+    // class clearance only shows up as DRC errors against the narrow one.
+    { ...def, name: "Heavy", track_width: 2.5, clearance: 0.18, via_diameter: 1.2, via_drill: 0.6 },
+    { ...def, name: "Wide", track_width: 2.0, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
     { ...def, name: "Power", track_width: 1.0, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
     { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
     { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
@@ -111,6 +113,9 @@ export interface RouteOptions {
   // only those and whatever was still open.
   keepTracks?: boolean;
   dirtyRefs?: string[];
+  // Route GND as tracks as well; the pours still fill on top. Off, GND is
+  // left to the pours alone, which strands any pad they cannot reach.
+  routeGnd?: boolean;
 }
 
 export async function routeWithFreerouting(project: string, unit = "", opts: RouteOptions | number = 30): Promise<RouteReport> {
@@ -130,11 +135,11 @@ b = pcbnew.LoadBoard('/work/board.kicad_pcb')
 pcbnew.ImportSpecctraSES(b, '/work/board.ses')
 dirty = set(${JSON.stringify([...dirty])})
 n = 0
-for t in list(b.GetTracks()):
+for t in list(b.Tracks()):
     if t.GetNetname() in dirty:
         b.Remove(t); n += 1
 pcbnew.SaveBoard('/work/board.kicad_pcb', b)
-print('kept', len(list(b.GetTracks())), 'dropped', n)
+print('kept', len(list(b.Tracks())), 'dropped', n)
 `);
     notes.push(`previous copper: ${pre.out.trim().split("\n").pop()} (nets on ${(o.dirtyRefs ?? []).join(", ") || "nothing"} redone)`);
   }
@@ -149,7 +154,7 @@ print('dsn', ok)
 
   // Ground is the pour on both sides; routing it as tracks wastes the router's
   // effort and the board's space. Take it out of the DSN's network section.
-  await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
+  if (!o.routeGnd) await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
   await run(["chmod", "777", dir], 10000);
   const fr = await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
     "java", "-jar", "/app/freerouting-executable.jar", "--user_data_path=/work/.freerouting", "--gui-enabled=false",
@@ -169,8 +174,8 @@ zones = b.Zones()
 pcbnew.ZONE_FILLER(b).Fill(zones)
 b.BuildConnectivity()
 pcbnew.SaveBoard('/work/board.kicad_pcb', b)
-tracks = [t for t in b.GetTracks() if t.GetClass() == 'PCB_TRACK']
-vias = [t for t in b.GetTracks() if t.GetClass() == 'PCB_VIA']
+tracks = [t for t in b.Tracks() if t.GetClass() == 'PCB_TRACK']
+vias = [t for t in b.Tracks() if t.GetClass() == 'PCB_VIA']
 print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconnectedCount(True)))
 `);
   const m = imp.out.match(/result (\d+) (\d+) (\d+)/);

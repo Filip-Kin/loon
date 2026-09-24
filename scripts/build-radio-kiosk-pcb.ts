@@ -68,6 +68,7 @@ const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotatio
   { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
   { ref: "J11", at: { x: 80, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
   { ref: "J8", at: { x: 16, y: 102 }, face: "W", rotation: 0 }, // fan (internal), left column
+  { ref: "J13", at: { x: 16, y: 109 }, face: "W", rotation: 0 }, // lid LED cable
   // Side-emitting LEDs at the wall, beside the ports they describe. Their
   // rotation is a guess until the lens direction is checked in KiCad's 3D view.
   { ref: "D30", at: { x: 99, y: 48 }, face: "E", rotation: 90 }, // power LED at the wall between J1 and J2
@@ -336,6 +337,7 @@ for (const g of GROUPS) {
   T("DC IN 14-26V", 98.2, 58, 1.0, 90);
   T("RADIO", 26.5, 121, 1.0, 90);
   T("FAN", 16, 96, 0.9);
+  T("LID LED", 16, 113, 0.9);
 }
 
 // #region checks
