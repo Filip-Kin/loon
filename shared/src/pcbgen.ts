@@ -171,8 +171,10 @@ export function generateBoard(schem: Schematic, resolve: DefResolver | undefined
 }
 
 // #region ratsnest
+// KiCad's rotation is counter-clockwise on screen with y down, so the maths
+// angle is the negative. pour.ts and autoroute.ts do the same.
 function rotate(p: Point, deg: number): Point {
-  const r = (deg * Math.PI) / 180;
+  const r = (-deg * Math.PI) / 180;
   const c = Math.cos(r);
   const s = Math.sin(r);
   return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };

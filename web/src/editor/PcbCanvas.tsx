@@ -402,7 +402,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
               y={t.at.y}
               fontSize={t.size}
               fill={LAYER_COLOR[t.layer] ?? "#d8d8d8"}
-              transform={t.rotation ? `rotate(${t.rotation},${t.at.x},${t.at.y})` : undefined}
+              transform={t.rotation ? `rotate(${-t.rotation},${t.at.x},${t.at.y})` : undefined}
               style={{ fontWeight: t.bold ? 700 : 400 }}
             >
               {t.text}
@@ -415,7 +415,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
             if (!fp) return null;
             const selected = f.uuid === sel;
             return (
-              <g key={f.uuid} transform={`translate(${f.at.x},${f.at.y}) rotate(${f.rotation}) ${f.side === "B" ? "scale(-1,1)" : ""}`}>
+              <g key={f.uuid} transform={`translate(${f.at.x},${f.at.y}) rotate(${-f.rotation}) ${f.side === "B" ? "scale(-1,1)" : ""}`}>
                 {fp.graphics
                   .filter((g) => vis(f.side === "B" ? g.layer.replace(/^F\./, "B.") : g.layer))
                   .map((g, i) => {
@@ -453,7 +453,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
                       />
                     );
                   return (
-                    <g key={i} transform={`translate(${p.x},${p.y}) rotate(${pad.rotation})`}>
+                    <g key={i} transform={`translate(${p.x},${p.y}) rotate(${-pad.rotation})`}>
                       {vis(maskLayer) && shape(LAYER_COLOR[maskLayer], 0.05, 0.35, "mask")}
                       {shown.map((l) => shape(thru ? "#c8a032" : LAYER_COLOR[l], 0, 0.92, l))}
                       {pad.drill && vis("Drill") ? <circle r={pad.drill / 2} fill="#101216" stroke="#f0f0f0" strokeWidth={0.05} /> : null}
