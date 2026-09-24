@@ -666,8 +666,16 @@ const pcbRouter = router({
       const footprints = await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
       const unit = input.unit ?? "";
       await storage.writeFile(input.project, "board.loon.json", JSON.stringify(board, null, 2), unit);
-      await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)), unit);
-      await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"), unit);
+      // Once KiCad has saved the board file it owns it: routing, silkscreen and
+      // footprints loon never fetched live there. Loon's model is a view of it
+      // (syncFromDisk), and writing the view back would drop what the view
+      // does not carry. So the KiCad file is only written while it is loon's.
+      let kicadOwned = false;
+      try { kicadOwned = /\(generator "pcbnew"\)/.test((await storage.readFile(input.project, "board.kicad_pcb", unit)).slice(0, 300)); } catch { /* no file yet */ }
+      if (!kicadOwned) {
+        await storage.writeFile(input.project, "board.kicad_pcb", serializeBoard(board, rawOf(footprints)), unit);
+        await storage.writeFile(input.project, "board.kicad_pro", serializeProject(board, "board"), unit);
+      }
       const rats = ratsnest(board, footprints);
       const drc = runDrc(board, footprints, rats.length);
       return { ok: true, drc, unrouted: rats.length };
