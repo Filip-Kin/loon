@@ -237,6 +237,15 @@ const NMOS_100V: IcSymbolSpec = {
   footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
   pins: SOIC8_FET_PINS,
 };
+const PMOS_40V_SO8: IcSymbolSpec = {
+  libId: "Transistor_FET:Power_PMOS_40V_SO8",
+  refPrefix: "Q",
+  value: "SI4401DDY P-MOSFET 40V",
+  description: "40 V P-channel MOSFET, SOIC-8, 9.5 mR. The laptop bypass switch: a 16 V brick straight to the laptop when no radio is on the port.",
+  keywords: "mosfet p-channel power 40v",
+  footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+  pins: SOIC8_FET_PINS,
+};
 const NMOS_40V_D: IcSymbolSpec = {
   libId: "Transistor_FET:Power_NMOS_40V_DPAK",
   refPrefix: "Q",
@@ -585,7 +594,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, LM3150, MCP6001, NMOS_40V_D, PMOS_100V, TLV7011, PMOS_40V, NMOS_60V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, LM3150, MCP6001, NMOS_40V_D, PMOS_100V, PMOS_40V_SO8, TLV7011, PMOS_40V, NMOS_60V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -794,6 +803,34 @@ export function buildRadioKiosk(): Schematic {
   // the jack instead: below ~5.6 V while enabled, firmware drops LAPTOP_EN.
   r("R48", "47k", 250, 300, "LAPTOP_OUT", "LAPTOP_OK");
   r("R49", "10k", 260, 300, "LAPTOP_OK", "GND");
+  // Bypass for a 16 V brick (the Toughbook's own): no buck can make 15.9 V
+  // from 16 V, so Q44 puts VIN straight onto +15V6_S, through Q7 to the jack.
+  // Source on VIN: the body diode can never push a 24 V brick into the laptop.
+  // U45 lets it close only below ~17.6 V at VIN, and only while the MCU holds
+  // LAPTOP_BYP high (the MCU pin is the comparator's reference: low = never).
+  // Firmware: bypass only with no radio on the port; radio present -> buck.
+  part("Q44", PMOS_40V_SO8.libId, "SI4401DDY", 300, 240);
+  for (const n of ["1", "2", "3"]) label("Q44", n, "VIN");
+  for (const n of ["5", "6", "7", "8"]) label("Q44", n, "+15V6_S");
+  label("Q44", "4", "BYP_G");
+  r("R7", "10k", 300, 220, "VIN", "BYP_G");
+  part("D24", "Device:D", "BZT52C12 zener", 310, 220, "Diode_SMD:D_SOD-123"); // cathode at the source: VGS clamped at -12 V
+  label("D24", "1", "VIN");
+  label("D24", "2", "BYP_G");
+  r("R8", "47k", 300, 226, "BYP_G", "BYP_D"); // 10k/47k: VGS -13 V at 16 V
+  part("Q45", "Device:Q_NMOS_GSD", "2N7002", 320, 226, FP.sot23);
+  label("Q45", "3", "BYP_D");
+  label("Q45", "2", "GND");
+  label("Q45", "1", "BYP_EN");
+  part("U45", TLV7011.libId, "TLV7011", 320, 300);
+  label("U45", "1", "BYP_EN");
+  label("U45", "2", "GND");
+  label("U45", "3", "BYP_REF"); // 2.2 V while LAPTOP_BYP is high: VIN_SENSE 2.2 V = 17.6 V
+  label("U45", "4", "VIN_SENSE");
+  label("U45", "5", "+3V3");
+  c("C17", "100n", 330, 314, "+3V3", "GND");
+  r("R9", "10k", 340, 300, "LAPTOP_BYP", "BYP_REF");
+  r("R10", "20k", 340, 312, "BYP_REF", "GND");
   // Laptop rail under firmware control, off at reset. On a shared USB-C port
   // the laptop's charge demand can exceed the allocation; firmware decides.
   r("R92", "100k", 80, 300, "U4_EN", "GND");
@@ -1141,6 +1178,7 @@ export function buildRadioKiosk(): Schematic {
     "31": "BK_EN", // PA10, high arms the pack switch
     "38": "PORT_SW", // PA15, high closes the port switch (54 V to the jack)
     "18": "PORT_SENSE", // PB0 ADC8, port voltage 1M/51k
+    "3": "LAPTOP_BYP", // PC14, high lets Q44 bypass the buck for a 16 V brick
     "2": "LAPTOP_OK", // PC13, LAPTOP_OUT above ~5.6 V; low while enabled = shorted jack, drop LAPTOP_EN
     "46": "USB_DIS", // PB9, high drops the USB-C input once the DC jack is live
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
@@ -1274,6 +1312,10 @@ export function buildRadioKiosk(): Schematic {
     U4: "C48112", // LM3150MHX/NOPB
     U12: "C2941042", // LM74700QDBVRQ1
     Q40: "C99124", Q41: "C99124", // AOD4184A
+    Q44: "C72317", // SI4401DDY-T1-GE3
+    Q45: "C8545", // 2N7002
+    U45: "C702117", // TLV7011DBVR
+    D24: "C12747", // LBZT52C12T1G
     L3: "C2847554", // MDA1040-150M
     L4: "C2847554", // MDA1040-150M
     L5: "C2687402", // SRP7028A-100M
