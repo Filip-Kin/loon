@@ -226,10 +226,10 @@ if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
   // (above the upper pin row) to the laptop buck, and a column at x 57.4
   // down to the 12 V and 5 V bucks; a spur to the sense divider.
   const q2 = padAt("Q2", "3"), q1 = padAt("Q1", "3");
-  F("VIN", [q2, { x: 80.8, y: q2.y }, { x: 80.8, y: 47.8 }]); via("VIN", 80.8, 47.8);
-  F("VIN", [q1, { x: 80.8, y: q1.y }, { x: 80.8, y: 60.9 }]); via("VIN", 80.8, 60.9);
+  F("VIN", [q2, { x: 80.8, y: q2.y }]); via("VIN", 80.8, q2.y);
+  F("VIN", [q1, { x: 80.8, y: q1.y }]); via("VIN", 80.8, q1.y);
   const c41 = padAt("C41", "1");                                       // laptop buck input cap, bottom pad
-  B("VIN", [{ x: 80.8, y: 60.9 }, { x: 80.8, y: 37 }, { x: 48.5, y: 37 }, { x: 48.5, y: 38.4 }]); via("VIN", 48.5, 38.4); // clear of the holder's locating hole at x 45.4
+  B("VIN", [{ x: 80.8, y: q1.y }, { x: 80.8, y: 37 }, { x: 48.5, y: 37 }, { x: 48.5, y: 38.4 }]); via("VIN", 48.5, 38.4); // clear of the holder's locating hole at x 45.4
   F("VIN", [{ x: 48.5, y: 38.4 }, c41]);
   B("VIN", [{ x: 57.4, y: 37 }, { x: 57.4, y: 114.9 }]);
   via("VIN", 57.4, 95.7); via("VIN", 57.4, 114.9);
@@ -244,9 +244,9 @@ if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
   const vb1 = padAt("J1", "A4B9"), vb2 = padAt("J1", "B4A9");
   // the signal pads' tips are at x 76.6: the bar sits at 75.3
   F("VIN_USB", [vb1, { x: 75.3, y: vb1.y }], 0.6); F("VIN_USB", [vb2, { x: 75.3, y: vb2.y }], 0.6);
-  F("VIN_USB", [{ x: 75.3, y: Math.min(vb1.y, vb2.y) }, { x: 75.3, y: 21.5 }]);
-  via("VIN_USB", 75.3, 19.5); via("VIN_USB", 75.3, 21.5);
-  B("VIN_USB", [{ x: 75.3, y: 19.5 }, { x: 75.3, y: 21.5 }, { x: 82.5, y: 28.7 }, { x: 82.5, y: 34.6 }]);
+  F("VIN_USB", [{ x: 75.3, y: Math.min(vb1.y, vb2.y) }, { x: 75.3, y: 20 }]);
+  via("VIN_USB", 75.3, 18); via("VIN_USB", 75.3, 20);
+  B("VIN_USB", [{ x: 75.3, y: 18 }, { x: 75.3, y: 20 }, { x: 82.5, y: 27.2 }, { x: 82.5, y: 34.6 }]);
   via("VIN_USB", 82.5, 34.6);
   const d1 = padAt("D1", "1");
   F("VIN_USB", [{ x: 82.5, y: 34.6 }, { x: 82.5, y: 53.5 }, { x: d1.x, y: 53.5 }, d1]);
