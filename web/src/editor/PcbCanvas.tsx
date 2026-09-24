@@ -67,6 +67,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   const [unrouted, setUnrouted] = useState(0);
   const [renders, setRenders] = useState<string[]>([]);
   const [routeNote, setRouteNote] = useState<string>("");
+  const [preview, setPreview] = useState<string | null>(null);
   const [tool, setTool] = useState<"move" | "track">("move");
   const [layer, setLayer] = useState("F.Cu");
   const [trackStart, setTrackStart] = useState<{ at: Point; net: string } | null>(null);
@@ -303,12 +304,18 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
         <span className="status">{board.rules.name}</span>
       </div>
       {routeNote && <div className="pcbnote">{routeNote}</div>}
+      {preview && (
+        <div className="lightbox" onClick={() => setPreview(null)}>
+          <img src={preview} alt="render" />
+          <a className="lightboxlink" href={preview} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open full size</a>
+        </div>
+      )}
       {renders.length > 0 && (
         <div className="renders">
           {renders.map((name) => {
             const href = `/artifact/${encodeURIComponent(project)}/${unit ? `boards/${unit}/` : ""}${name}?t=${Date.now()}`;
             return (
-              <a key={name} href={href} target="_blank" rel="noreferrer" title={name}>
+              <a key={name} href={href} title={name} onClick={(e) => { e.preventDefault(); setPreview(href); }}>
                 <img src={href} alt={name} />
               </a>
             );

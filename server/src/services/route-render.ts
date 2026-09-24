@@ -35,7 +35,9 @@ const kicadPy = (dir: string, script: string, extra: string[] = []) =>
 // Which nets get wide copper. A rail is anything that carries the load; the
 // names are loon's conventions plus whatever the caller adds.
 export interface NetClassPlan {
-  power: string[];
+  heavy?: string[];   // 2.5 mm: the input bus and anything carrying 5 A
+  wide?: string[];    // 2.0 mm: a 3 A rail
+  power: string[];    // 1.0 mm
   logic?: string[];
   ethernet?: string[];
 }
@@ -43,8 +45,12 @@ export function defaultNetClassPlan(board: Board): NetClassPlan {
   const nets = new Set<string>();
   for (const f of board.footprints) for (const n of Object.values(f.padNets)) nets.add(n);
   const all = [...nets];
+  const heavy = all.filter((n) => /^(VIN|VIN_USB|VIN_USBS|VIN_DC|VBUS)$/.test(n));
+  const wide = all.filter((n) => /^(LAPTOP_OUT|\+15V6_BUCK|\+15V6_S|\+12V|\+12V_BUCK)$/.test(n));
   return {
-    power: all.filter((n) => /^(\+\d|VIN|VBUS|PORT_[PN]$|PACK|LAPTOP_OUT|BOOST_SW|BOOST_CS|FAN_N|PSE_SENSE|PSE_AGND|TEST_NODE|_OUT$)/.test(n) && n !== "+3V3"),
+    heavy,
+    wide,
+    power: all.filter((n) => /^(\+\d|VIN|VBUS|PORT_[PN]$|PACK|LAPTOP_OUT|BOOST_SW|BOOST_CS|FAN_N|PSE_SENSE|PSE_AGND|TEST_NODE|_OUT$)/.test(n) && n !== "+3V3" && !heavy.includes(n) && !wide.includes(n)),
     logic: all.filter((n) => n === "+3V3"),
     ethernet: all.filter((n) => /^ETH_/.test(n)),
   };
@@ -52,14 +58,20 @@ export function defaultNetClassPlan(board: Board): NetClassPlan {
 
 export async function writeNetClasses(project: string, unit: string, plan: NetClassPlan): Promise<void> {
   const pro = JSON.parse(await storage.readFile(project, "board.kicad_pro", unit));
-  const def = { ...pro.net_settings.classes[0], clearance: 0.2 };
+  // 0.18: the USB-C receptacle's pads sit 0.2 mm apart, and OSH Park and
+  // JLC both allow 0.15.
+  const def = { ...pro.net_settings.classes[0], clearance: 0.18 };
   pro.net_settings.classes = [
     def,
-    { ...def, name: "Power", track_width: 1.0, clearance: 0.2, via_diameter: 0.9, via_drill: 0.5 },
+    { ...def, name: "Heavy", track_width: 2.5, clearance: 0.25, via_diameter: 1.2, via_drill: 0.6 },
+    { ...def, name: "Wide", track_width: 2.0, clearance: 0.2, via_diameter: 1.0, via_drill: 0.5 },
+    { ...def, name: "Power", track_width: 1.0, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
     { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
     { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
   ];
   pro.net_settings.netclass_patterns = [
+    ...(plan.heavy ?? []).map((n) => ({ netclass: "Heavy", pattern: n })),
+    ...(plan.wide ?? []).map((n) => ({ netclass: "Wide", pattern: n })),
     ...plan.power.map((n) => ({ netclass: "Power", pattern: n })),
     ...(plan.logic ?? []).map((n) => ({ netclass: "Logic", pattern: n })),
     ...(plan.ethernet ?? []).map((n) => ({ netclass: "Ethernet", pattern: n })),
@@ -92,10 +104,40 @@ export interface RouteReport {
   notes: string[];
 }
 
-export async function routeWithFreerouting(project: string, unit = "", passes = 30): Promise<RouteReport> {
+export interface RouteOptions {
+  passes?: number;
+  // Start from the previous session's copper instead of a blank board. Nets on
+  // the given parts (moved since) are stripped first so the router redoes
+  // only those and whatever was still open.
+  keepTracks?: boolean;
+  dirtyRefs?: string[];
+}
+
+export async function routeWithFreerouting(project: string, unit = "", opts: RouteOptions | number = 30): Promise<RouteReport> {
+  const o: RouteOptions = typeof opts === "number" ? { passes: opts } : opts;
+  const passes = o.passes ?? 30;
   const dir = storage.projectDir(project, unit);
   const notes: string[] = [];
   const t0 = Date.now();
+
+  if (o.keepTracks && existsSync(join(dir, "board.ses"))) {
+    const board = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
+    const dirty = new Set<string>();
+    for (const f of board.footprints) if ((o.dirtyRefs ?? []).includes(f.ref)) for (const n of Object.values(f.padNets)) dirty.add(n);
+    const pre = await kicadPy(dir, `
+import pcbnew
+b = pcbnew.LoadBoard('/work/board.kicad_pcb')
+pcbnew.ImportSpecctraSES(b, '/work/board.ses')
+dirty = set(${JSON.stringify([...dirty])})
+n = 0
+for t in list(b.GetTracks()):
+    if t.GetNetname() in dirty:
+        b.Remove(t); n += 1
+pcbnew.SaveBoard('/work/board.kicad_pcb', b)
+print('kept', len(list(b.GetTracks())), 'dropped', n)
+`);
+    notes.push(`previous copper: ${pre.out.trim().split("\n").pop()} (nets on ${(o.dirtyRefs ?? []).join(", ") || "nothing"} redone)`);
+  }
 
   const dsn = await kicadPy(dir, `
 import pcbnew
@@ -221,9 +263,9 @@ export async function renderBoard(project: string, unit = ""): Promise<{ images:
   const base = [DOCKER, "run", "--rm", ...mounts, KICAD, "kicad-cli", "pcb"];
   const notes: string[] = [];
   const views: [string, string[]][] = [
-    ["render-top.png", ["--side", "top"]],
-    ["render-bottom.png", ["--side", "bottom"]],
-    ["render-iso.png", ["--rotate", "-40,0,30", "--perspective", "--zoom", "1.1", "--floor"]],
+    ["render-top.png", ["--side", "top", "--zoom", "0.7"]],
+    ["render-bottom.png", ["--side", "bottom", "--zoom", "0.7"]],
+    ["render-iso.png", ["--rotate", "-40,0,30", "--perspective", "--zoom", "0.6", "--floor"]],
   ];
   for (const [name, extra] of views) {
     const r = await run([...base, "render", "--output", `/work/${name}`, "--width", "1800", "--height", "1300", "--quality", "high", "--background", "opaque", ...extra, "/work/board.kicad_pcb"], 900000);

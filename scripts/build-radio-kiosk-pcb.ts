@@ -39,25 +39,26 @@ const GROUPS: Group[] = [
   // cell holders lie across the back (y 21-65), so their pins come through on
   // two rows, y ~24 and y ~62; the front bands are above, between and below.
   // The left side is the quiet side: the Ethernet pass-through runs from J6
-  // to J5 down a lane at x 24-30, with only the battery switch, bulk caps and
-  // fan driver beside it. Every switcher is on the right half.
+  // to J5 as two differential pairs on the back along the left edge (x 2-5),
+  // with only the battery switch, bulk caps and fan driver beside it. Every
+  // switcher is on the right half.
   { name: "usb", refs: [/^J10$/], at: { x: 50, y: 14 } },
-  { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 13, y: 91 } },
+  { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 16, y: 94 } },
   { name: "mcu", refs: [/^U40$/, /^C13[0-6]$/, /^R11[12]$/, /^SW[12]$/, /^R26$/, /^R100$/, /^U30$/, /^C110$/, /^R103$/], at: { x: 48, y: 35 } },
   { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 88, y: 40 } },
   { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 72, y: 36 } },
   { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 66, y: 49 } },
   { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 48, y: 52 } },
-  { name: "backup", refs: [/^F1$/, /^Q8$/, /^R8[0-9]$/, /^Q9$/, /^Q1[01]$/, /^U10$/, /^C99$/], at: { x: 13, y: 40 } },
-  { name: "bulk", refs: [/^C9[78]$/], at: { x: 13, y: 76 } },
-  { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 13, y: 108 } },
+  { name: "backup", refs: [/^F1$/, /^Q8$/, /^R8[0-9]$/, /^Q9$/, /^Q1[01]$/, /^U10$/, /^C99$/], at: { x: 17, y: 40 } },
+  { name: "bulk", refs: [/^C9[78]$/], at: { x: 16, y: 76 } },
+  { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 27, y: 100 } },
   { name: "efuse", refs: [/^U21$/, /^R6[0-3]$/, /^C6[0-2]$/, /^Q13$/], at: { x: 85, y: 55 } },
-  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 84, y: 115 } },
-  { name: "boost", refs: [/^U20$/, /^Q20$/, /^L20$/, /^D2[01]$/, /^R2[0-5]$/, /^C2[0-5]$/], at: { x: 46, y: 81 } },
-  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 84, y: 89 } },
-  { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 40, y: 112 } },
-  { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 62, y: 111 } },
-  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 66, y: 126 } },
+  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 83, y: 115 } },
+  { name: "boost", refs: [/^U20$/, /^Q20$/, /^L20$/, /^D2[01]$/, /^R2[0-5]$/, /^C2[0-5]$/], at: { x: 44, y: 81 } },
+  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 83, y: 88 } },
+  { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 39, y: 112 } },
+  { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 60, y: 113 } },
+  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 76, y: 102 } },
   { name: "cells", refs: [/^BT[1-4]$/], at: { x: 52, y: 43 }, side: "B" },
 ];
 
@@ -65,12 +66,12 @@ const GROUPS: Group[] = [
 // after the group move so the jack opening points off the board.
 const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotation?: number }[] = [
   { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
-  { ref: "J11", at: { x: 82, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
-  { ref: "J8", at: { x: 13, y: 100 }, face: "W", rotation: 0 }, // fan (internal), left column
+  { ref: "J11", at: { x: 80, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
+  { ref: "J8", at: { x: 16, y: 102 }, face: "W", rotation: 0 }, // fan (internal), left column
   // Side-emitting LEDs at the wall, beside the ports they describe. Their
   // rotation is a guess until the lens direction is checked in KiCad's 3D view.
-  { ref: "D30", at: { x: 98, y: 48 }, face: "E", rotation: 90 }, // power LED between J2 and J1
-  { ref: "D31", at: { x: 30, y: 128 }, face: "S", rotation: 0 }, // radio LED beside J5
+  { ref: "D30", at: { x: 99, y: 48 }, face: "E", rotation: 90 }, // power LED at the wall between J1 and J2
+  { ref: "D31", at: { x: 26, y: 129 }, face: "S", rotation: 0 }, // radio LED at the wall beside J5
 ];
 
 // Jacks sit with their front face at the board edge, opening outward. Each
@@ -85,9 +86,11 @@ const FLUSH: { ref?: string; libMatch?: RegExp; edge: "N" | "E" | "S" | "W"; alo
   { ref: "J5", edge: "S", along: 16, front: "+y", overhang: 0.8 }, // radio RJ45
 ];
 // Rotation that turns a footprint's front axis toward an edge (loon's rotation sense).
+// KiCad's rotation is counter-clockwise on screen (y down), so a +Y front
+// turned to face East needs 90, not 270. Checked against the 3D render.
 const FRONT_ROT: Record<"+x" | "+y", Record<"N" | "E" | "S" | "W", number>> = {
-  "+y": { N: 180, E: 270, S: 0, W: 90 },
-  "+x": { N: 270, E: 0, S: 90, W: 180 },
+  "+y": { N: 180, E: 90, S: 0, W: 270 },
+  "+x": { N: 90, E: 0, S: 270, W: 180 },
 };
 
 // #region helpers
@@ -232,11 +235,12 @@ const EDGE = 2;
 for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref); if (f) taken.push(rectOf(f, fpOf(f))); }
 for (const h of holes) taken.push({ x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2: h.at.x + 3.5, y2: h.at.y + 3.5 });
 for (const p of cellPads) taken.push({ x1: p.x - 2, y1: p.y - 2, x2: p.x + 2, y2: p.y + 2 });
-// Ethernet pass-through lane, J6 to J5: nothing else goes here.
-taken.push({ x1: 24, y1: 18, x2: 30, y2: 112 });
+// Ethernet pass-through lane, J6 to J5, along the left edge on the back:
+// nothing else goes here on either side.
+taken.push({ x1: 1.5, y1: 20, x2: 7, y2: 110 });
 const hits = (r: R) => taken.some((t) => r.x1 < t.x2 && r.x2 > t.x1 && r.y1 < t.y2 && r.y2 > t.y1);
 const GAP = 0.8;
-const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 18, bulk: 14, buck15: 28, buck5: 20, ntc: 8, fan: 12, backup: 20, boost: 30, efuse: 20, pse: 24, port: 8 };
+const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 18, bulk: 14, buck15: 30, buck5: 20, ntc: 8, fan: 12, backup: 20, boost: 30, efuse: 20, pse: 20, port: 8 };
 for (const g of GROUPS) {
   if (g.name === "cells") continue;
   const members = board.footprints.filter((f) => groupOf.get(f.ref) === g && !connectorRefs.has(f.ref) && !/USB_C_Receptacle/.test(f.libId));
@@ -284,6 +288,54 @@ for (const g of GROUPS) {
   const t = sc(g.at);
   const moved = Math.hypot(best.x - t.x, best.y - t.y);
   console.log(`${g.name.padEnd(8)} ${members.length.toString().padStart(3)} parts  ${bw.toFixed(0).padStart(2)} x ${bh.toFixed(0).padStart(2)} mm  at (${best.x}, ${best.y})${moved > 0.5 ? `  moved ${moved.toFixed(0)} mm from (${t.x}, ${t.y})` : ""}`);
+}
+
+// #region Ethernet pairs, hand-routed on the back along the left edge
+// Freerouting keeps existing copper, so these four tracks are the pass-through
+// as built: ETH_1/2 and ETH_3/6 as two pairs at 0.3 mm on 0.5 mm centres,
+// straight down x 2-4 on B.Cu, jogs at each jack. At J6 the jogs are on B.Cu
+// below the pins; at J5 they are on F.Cu above the pins, through a via at the
+// lane, so nothing crosses on one layer.
+{
+  const padOf = (ref: string, net: string) => {
+    const f = board.footprints.find((x) => x.ref === ref)!;
+    const pad = fpOf(f).pads.find((p) => f.padNets[p.number] === net)!;
+    return padWorld(f, pad.at);
+  };
+  const nets = ["ETH_1", "ETH_2", "ETH_3", "ETH_6"];
+  const top = nets.map((n) => ({ n, p: padOf("J6", n) })).sort((a, b) => a.p.x - b.p.x); // k by pad x at J6
+  const W_ETH = 0.3;
+  const seg = (layer: string, a: Point, b: Point, net: string) => board.tracks.push({ uuid: crypto.randomUUID(), layer, width: W_ETH, start: a, end: b, net });
+  top.forEach(({ n, p }, k) => {
+    const laneX = 2.0 + k * 0.5;                 // k=0 outermost
+    const rowTop = p.y + 2.2 + k * 0.5;          // below the J6 pins, B.Cu
+    const q = padOf("J5", n);
+    const rowBot = q.y - 2.2 - (3 - k) * 0.5;    // above the J5 pins, F.Cu; k=0 farthest
+    seg("B.Cu", p, { x: p.x, y: rowTop }, n);
+    seg("B.Cu", { x: p.x, y: rowTop }, { x: laneX, y: rowTop }, n);
+    seg("B.Cu", { x: laneX, y: rowTop }, { x: laneX, y: rowBot }, n);
+    board.vias.push({ uuid: crypto.randomUUID(), at: { x: laneX, y: rowBot }, size: 0.6, drill: 0.3, net: n });
+    seg("F.Cu", { x: laneX, y: rowBot }, { x: q.x, y: rowBot }, n);
+    seg("F.Cu", { x: q.x, y: rowBot }, q, n);
+  });
+  console.log(`ethernet: ${board.tracks.length} segments, ${board.vias.length} vias pre-routed`);
+}
+
+// #region silkscreen: what the box is and where things plug in
+{
+  const T = (text: string, x: number, y: number, size = 1.2, rotation = 0, layer = "F.SilkS") => board.texts.push({ at: { x, y }, text, layer, size, thickness: 0.15, rotation });
+  T("FRC RADIO KIOSK v2", 78, 11, 1.6);
+  T("Filip Kin  2026", 78, 14, 1.2);
+  T("filipkin.com", 78, 16.6, 1.0);
+  T("LAPTOP", 16, 19, 1.0);
+  T("LAPTOP 15.6V", 33, 13.5, 1.0);
+  T("SERIAL", 50, 11, 1.0);
+  T("SWD", 68, 9, 0.9);
+  T("UART", 80, 9, 0.9);
+  T("USB-C PD IN", 97, 40, 1.0, 90);
+  T("DC IN 14-26V", 98.2, 58, 1.0, 90);
+  T("RADIO", 26.5, 121, 1.0, 90);
+  T("FAN", 16, 96, 0.9);
 }
 
 // #region checks

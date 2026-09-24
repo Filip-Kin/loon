@@ -696,12 +696,12 @@ const pcbRouter = router({
   // Real routing: Freerouting through KiCad, both in containers. Wide copper
   // for the power nets comes from net classes written into the project first.
   autoroute: publicProcedure
-    .input(z.object({ project: z.string(), board: z.string().optional(), passes: z.number().optional() }))
+    .input(z.object({ project: z.string(), board: z.string().optional(), passes: z.number().optional(), keepTracks: z.boolean().optional(), dirtyRefs: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {
       const unit = input.board ?? "";
       const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       await writeNetClasses(input.project, unit, defaultNetClassPlan(board));
-      const report = await routeWithFreerouting(input.project, unit, input.passes ?? 30);
+      const report = await routeWithFreerouting(input.project, unit, { passes: input.passes ?? 30, keepTracks: input.keepTracks, dirtyRefs: input.dirtyRefs });
       const routed = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       return { report, board: routed };
     }),
