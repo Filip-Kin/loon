@@ -144,10 +144,8 @@ export function autoroute(
     // Keepout zones are the part's own rules - an RF module's antenna clearance
     // is the reason this board has a radio that works.
     for (const ring of fp.keepouts ?? []) {
-      const rad = (-f.rotation * Math.PI) / 180;
       const world = ring.map((pt) => ({
-        x: f.at.x + pt.x * Math.cos(rad) - pt.y * Math.sin(rad),
-        y: f.at.y + pt.x * Math.sin(rad) + pt.y * Math.cos(rad),
+        ...localWorld(f, pt),
       }));
       const kx1 = Math.max(0, cellX(Math.min(...world.map((p) => p.x))) - 1);
       const kx2 = Math.min(W - 1, cellX(Math.max(...world.map((p) => p.x))) + 1);

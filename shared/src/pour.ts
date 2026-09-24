@@ -84,11 +84,7 @@ export function stitchVias(
     const fp = footprints[f.libId];
     if (!fp) continue;
     for (const pad of fp.pads) {
-      const rad = (-f.rotation * Math.PI) / 180;
-      const at = {
-        x: f.at.x + pad.at.x * Math.cos(rad) - pad.at.y * Math.sin(rad),
-        y: f.at.y + pad.at.x * Math.sin(rad) + pad.at.y * Math.cos(rad),
-      };
+      const at = localWorld(f, pad.at);
       // Even a pad on the same net is a place a via should not sit: it would
       // land in the middle of a footprint.
       // A mounting hole has a drill and no copper, and it still has to be

@@ -180,10 +180,15 @@ function rotate(p: Point, deg: number): Point {
   return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
 }
 
+// A footprint on the back is mirrored in x first, then turned: that is
+// what KiCad does with the flipped local coordinates it stores.
+export function localWorld(f: PlacedFootprint, local: Point): Point {
+  const m = f.side === "B" ? { x: -local.x, y: local.y } : local;
+  const r = rotate(m, f.rotation);
+  return { x: f.at.x + r.x, y: f.at.y + r.y };
+}
 export function padWorld(f: PlacedFootprint, padAt: Point): Point {
-  const r = rotate(padAt, f.rotation);
-  const mirrored = f.side === "B" ? { x: -r.x, y: r.y } : r;
-  return { x: f.at.x + mirrored.x, y: f.at.y + mirrored.y };
+  return localWorld(f, padAt);
 }
 
 // Minimum spanning tree per net: the shortest set of lines that shows what

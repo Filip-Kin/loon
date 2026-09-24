@@ -40,8 +40,8 @@ export function rot(p: Point, deg: number): Point {
 export function centreOf(f: PlacedFootprint, fp?: Footprint): Point {
   const box = fp?.courtyard ?? fp?.bbox;
   if (!box) return f.at;
-  const c = rot({ x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2 }, f.rotation);
-  const m = f.side === "B" ? { x: -c.x, y: c.y } : c;
+  const c = { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2 };
+  const m = rot(f.side === "B" ? { x: -c.x, y: c.y } : c, f.rotation);
   return { x: f.at.x + m.x, y: f.at.y + m.y };
 }
 export function rectOf(f: PlacedFootprint, fp?: Footprint): R {
@@ -104,8 +104,8 @@ export const placeAtCentre = (fpOf: Prepared["fpOf"], f: PlacedFootprint, centre
   const fp = fpOf(f);
   f.rotation = rotation;
   const box = fp?.courtyard ?? fp?.bbox;
-  const cc = box ? rot({ x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2 }, rotation) : { x: 0, y: 0 };
-  const m = f.side === "B" ? { x: -cc.x, y: cc.y } : cc;
+  const cc = box ? { x: (box.min.x + box.max.x) / 2, y: (box.min.y + box.max.y) / 2 } : { x: 0, y: 0 };
+  const m = rot(f.side === "B" ? { x: -cc.x, y: cc.y } : cc, rotation);
   f.at = { x: +(centre.x - m.x).toFixed(2), y: +(centre.y - m.y).toFixed(2) };
 };
 
@@ -177,7 +177,7 @@ export function placeHoles(p: Prepared, W: number, H: number, inset = 4): Placed
 // layer. Lanes: 0.3 mm on 0.5 mm centres in a pair, the pairs 1 mm apart,
 // between the corner hole and the jack. Corners are 45-degree mitres. The
 // shorter (near-pin) track of each pair gets trombone bumps until matched.
-export function preRouteEthernet(p: Prepared, H: number, laneX0 = 8.0) {
+export function preRouteEthernet(p: Prepared, H: number, laneX0 = 8.0, midX0 = laneX0, jogY = 13) {
   const { board, fpOf } = p;
   const padOf = (ref: string, net: string) => {
     const f = board.footprints.find((x) => x.ref === ref)!;
@@ -215,7 +215,13 @@ export function preRouteEthernet(p: Prepared, H: number, laneX0 = 8.0) {
       const vTop = { x: laneX, y: nearRow6 + (near ? 2.0 : 1.0) }, vBot = { x: laneX, y: nearRow5 - (near ? 2.0 : 1.0) };
       top.push(vTop); bot.unshift(vBot); vias.push(vTop, vBot);
     }
-    const lane: Point[] = [top[top.length - 1], bot[0]];
+    // Down the board the lanes sit at the edge (midX0); beside the jacks they
+    // are further in (laneX0), past the corner hole. 45-degree jogs between.
+    const shift = laneX0 - midX0;
+    const t0 = top[top.length - 1], b0 = bot[0];
+    const lane: Point[] = shift > 0.01
+      ? [t0, { x: laneX, y: jogY }, { x: laneX - shift, y: jogY + shift }, { x: laneX - shift, y: H - jogY - shift }, { x: laneX, y: H - jogY }, b0]
+      : [t0, b0];
     plan.push({ n, jogLayer: pi === 0 ? "B.Cu" : "F.Cu", laneX, top, lane, bot, vias, near, a, q, rowTop, rowBot });
   }));
   // Trombones: bumps of depth h, top width w, corners m, each adding about
