@@ -741,9 +741,9 @@ export function buildRadioKiosk(): Schematic {
   // LMR33630 stops at 3 A, so this is an LM3150 controller with two AOD4184A
   // switches, 300 kHz constant on-time. Values from SNVS561G section 9.2.2:
   // RON = VOUT / (100 pC x fs) = 523k; FB = 0.6 V x (1 + 126k / 4.99k);
-  // RLIM = ICL x RDS(on)hot / 85 uA = 4.8 A x 12 mR / 85 uA = 681R (low-side
-  // RDS(on) sensing, valley limit ~4.8 A); SS 68 nF = 5 ms; BST 0.47 uF; VCC
-  // 4.7 uF. Ripple at 20 V in: (20 - 15.75) x 2.6 us / 10 uH = 1.1 A.
+  // RLIM 750R: worst case (75 uA, 12 mR hot) a 4.7 A valley limit; SS 100 nF =
+  // 7.8 ms; BST 0.47 uF; VCC 4.7 uF. RON 820k, ~190 kHz at 20 V: 300 kHz left
+  // no room for the 725 ns minimum off-time at D = 0.8. Ripple 24 V in: 1.85 A.
   part("U4", LM3150.libId, "LM3150 15.75V 4.5A", 80, 260);
   label("U4", "2", "VIN");
   label("U4", "3", "U4_EN");
@@ -764,12 +764,12 @@ export function buildRadioKiosk(): Schematic {
   c("C42", "4.7u/16V", 114, 274, "U4_VCC", "GND");
   c("C43", "470n/16V", 106, 240, "U4_BST", "U4_SW");
   c("C48", "100n", 46, 274, "U4_SS", "GND");
-  c("C49", "220p", 128, 290, "+15V6_BUCK", "U4_FB");
-  r("R44", "510k", 46, 290, "VIN", "U4_RON");
-  r("R45", "680R", 114, 254, "U4_ILIM", "U4_SW");
+  c("C49", "2.2n", 128, 290, "+15V6_BUCK", "U4_FB");
+  r("R44", "820k", 46, 290, "VIN", "U4_RON");
+  r("R45", "750R", 114, 254, "U4_ILIM", "U4_SW");
   r("R41", "51k", 128, 302, "+15V6_BUCK", "U4_FB");
   r("R40", "2k", 128, 314, "U4_FB", "GND");
-  // EN through 10k: +3V3 can outlast VIN for a moment and EN must stay under VIN + 0.3 V
+  // EN through 10k (EN has its own 1 M pull-up to an internal 6 V; abs max 7 V)
   r("R46", "10k", 66, 290, "LAPTOP_EN", "U4_EN");
   part("Q40", NMOS_40V_D.libId, "AOD4184A", 120, 236);
   label("Q40", "2", "VIN");
@@ -779,10 +779,21 @@ export function buildRadioKiosk(): Schematic {
   label("Q41", "2", "U4_SW");
   label("Q41", "1", "U4_LG");
   label("Q41", "3", "GND");
-  part("L4", "Device:L", "MDA1040-100M 10u 8A", 140, 240, FP.l11x10);
+  part("L4", "Device:L", "MDA1040-150M 15u 6A", 140, 240, FP.l11x10);
   label("L4", "1", "U4_SW");
   label("L4", "2", "+15V6_BUCK");
-  for (let i = 0; i < 3; i++) c(`C${45 + i}`, "22u/25V", 150 + i * 8, 254, "+15V6_BUCK", "GND", FP.c1210);
+  // Output: one ceramic at the inductor plus a 50 mR polymer. The LM3150's
+  // emulated-ripple loop still needs ESR in the window of SNVS561G Eq. 63-66;
+  // an all-ceramic bank (2-5 mR) sits ten times under the minimum.
+  c("C45", "22u/25V", 150, 254, "+15V6_BUCK", "GND", FP.c1210);
+  part("C46", "Device:C_Polarized", "220u/25V polymer", 160, 254, "Capacitor_SMD:CP_Elec_6.3x7.7");
+  label("C46", "1", "+15V6_BUCK");
+  label("C46", "2", "GND");
+  // Shorted jack: the CC loop holds FB at 0.6 V, so the LM3150 never sees a
+  // short and Q7's body diode would carry the setpoint current. PC13 watches
+  // the jack instead: below ~5.6 V while enabled, firmware drops LAPTOP_EN.
+  r("R48", "47k", 250, 300, "LAPTOP_OUT", "LAPTOP_OK");
+  r("R49", "10k", 260, 300, "LAPTOP_OK", "GND");
   // Laptop rail under firmware control, off at reset. On a shared USB-C port
   // the laptop's charge demand can exceed the allocation; firmware decides.
   r("R92", "100k", 80, 300, "U4_EN", "GND");
@@ -928,11 +939,11 @@ export function buildRadioKiosk(): Schematic {
   // switch limit near 5.3 A (~35 W in at D = 0.78), the inductor is rated 4.5 A.
   part("U20", LM3478.libId, "LM3478 54V boost", px, py);
   part("Q20", NMOS_100V.libId, "AO4482", px + 50, py - 20);
-  part("L20", "Device:L", "MDA1365-330M 33u 4.5A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H8mm");
+  part("L20", "Device:L", "MDA1365-330M 33u 9A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H8mm");
   part("D20", "Device:D", "SS310 100V Schottky", px + 70, py - 40, FP.sma);
   r("R20", "15m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
   r("R21", "47k", px - 30, py + 14, "BOOST_FA", "GND");
-  r("R22", "510k", px + 100, py - 10, "BOOST_OUT", "BOOST_FB");
+  r("R22", "499k 1%", px + 100, py - 10, "BOOST_OUT", "BOOST_FB");
   r("R23", "12k", px + 100, py + 2, "BOOST_FB", "GND");
   c("C20", "100p", px + 110, py + 2, "BOOST_FB", "GND");
   r("R24", "10k", px - 30, py - 10, "BOOST_COMP", "BOOST_COMPC");
@@ -964,6 +975,9 @@ export function buildRadioKiosk(): Schematic {
   label("Q24", "1", "PORT_SW");
   r("R29", "100k", px + 170, py + 20, "PORT_SW", "GND");
   // Shutdown from the MCU through a diode so R21 alone still sets the frequency.
+  // 61 uF through the FB divider alone takes half a minute to fall; the
+  // bleeder brings the boost output down in seconds once it is off (29 mW).
+  r("R42", "100k", px + 136, py - 10, "BOOST_OUT", "GND");
   r("R25", "1k", px - 50, py + 26, "BOOST_SD", "BOOST_SDD");
   part("D21", "Device:D", "1N4148W", px - 40, py + 26, "Diode_SMD:D_SOD-123");
   label("D21", "2", "BOOST_SDD");
@@ -1008,9 +1022,9 @@ export function buildRadioKiosk(): Schematic {
   label("U21", "15", "PORT_P");
   label("U21", "16", "PORT_P");
   label("U21", "17", "GND");
-  r("R60", "5.1k", ex + 50, ey - 10, "PASSIVE_ILIM", "GND");
+  r("R60", "5.6k", ex + 50, ey - 10, "PASSIVE_ILIM", "GND");
   r("R61", "10k", ex + 50, ey + 2, "PASSIVE_IMON", "GND");
-  c("C60", "10n", ex + 50, ey + 14, "PASSIVE_DVDT", "GND");
+  c("C60", "47n", ex + 50, ey + 14, "PASSIVE_DVDT", "GND");
   r("R62", "10k", ex + 50, ey + 26, "+3V3", "PASSIVE_FLT");
   r("R63", "10k", ex - 30, ey + 20, "PASSIVE_EN", "GND"); // holds SHDN low against its 10 uA pull-up
   c("C61", "1u/50V", ex - 30, ey - 10, "+12V", "GND", FP.c1206);
@@ -1126,7 +1140,8 @@ export function buildRadioKiosk(): Schematic {
     "21": "PD_SCL", "22": "PD_SDA", // PB10/PB11 I2C2 to the CH224A
     "31": "BK_EN", // PA10, high arms the pack switch
     "38": "PORT_SW", // PA15, high closes the port switch (54 V to the jack)
-    "18": "PORT_SENSE", // PB0 ADC8, port voltage 56 V -> 2.97 V
+    "18": "PORT_SENSE", // PB0 ADC8, port voltage 1M/51k
+    "2": "LAPTOP_OK", // PC13, LAPTOP_OUT above ~5.6 V; low while enabled = shorted jack, drop LAPTOP_EN
     "46": "USB_DIS", // PB9, high drops the USB-C input once the DC jack is live
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
     "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
@@ -1260,7 +1275,7 @@ export function buildRadioKiosk(): Schematic {
     U12: "C2941042", // LM74700QDBVRQ1
     Q40: "C99124", Q41: "C99124", // AOD4184A
     L3: "C2847554", // MDA1040-150M
-    L4: "C2847553", // MDA1040-100M
+    L4: "C2847554", // MDA1040-150M
     L5: "C2687402", // SRP7028A-100M
     Q23: "C156277", // DMP10H400SE-13
     Q24: "C78755", // BSS123LT1G
@@ -1268,6 +1283,7 @@ export function buildRadioKiosk(): Schematic {
     U31: "C7484", // SN74AHCT1G125DBVR
     C4: "C970680", // 47u/63V D8x10
     C26: "C337978", // 4.7u/100V 1210
+    C46: "C2981459", // KNSCHA 220u/25V polymer, 50 mR
     Q25: "C8545", // 2N7002
     U10: "C702117", // TLV7011DBVR
     U20: "C115907", // LM3478MAX/NOPB
@@ -1355,9 +1371,10 @@ export function buildRadioKiosk(): Schematic {
     "R|0805|20k": "C4328", "R|0805|33k": "C17633", "R|0805|47k": "C17713", "R|0805|51k": "C17737", "R|0805|100k": "C149504",
     "R|0805|150k": "C17470", "R|0805|220k": "C17556", "R|0805|510k": "C17724", "R|0805|1M": "C17514", "R|0805|1M 1%": "C17514",
     "R|0805|120k 1%": "C17436", // CH224 CFG1 table value: extended
+    "R|0805|820k": "C50136", "R|0805|750R": "C17818", "R|0805|499k 1%": "C17721", "R|0805|5.6k": "C4382", // extended values the datasheets pin down
     "R|0603|5.1k": "C23186",
     // 0805 / 0603 / 1206 capacitors
-    "C|0805|100p": "C1790", "C|0805|220p": "C107145", "C|0805|4.7n": "C1744", "C|0805|10n": "C1710", "C|0805|47n": "C53134",
+    "C|0805|100p": "C1790", "C|0805|220p": "C107145", "C|0805|2.2n": "C28260", "C|0805|4.7n": "C1744", "C|0805|10n": "C1710", "C|0805|47n": "C53134",
     "C|0805|100n": "C28233", "C|0805|100n/50V": "C49678", "C|0805|220n/50V": "C5378", "C|0805|470n/16V": "C13967",
     "C|0805|1u": "C28323", "C|0805|4.7u": "C1779", "C|0805|4.7u/16V": "C1779",
     "C|0603|1u": "C15849", "C|0603|10u": "C19702", "C|1206|1u/50V": "C1848",
