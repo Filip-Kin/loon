@@ -587,11 +587,12 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   }
   board.texts = texts;
 
+  // Zones as the file has them: KiCad may have changed a pour's net or outline.
   const fills = readZoneFills(text);
   let filled = 0;
-  for (const z of board.zones) {
-    const hit = fills.find((f) => f.net === z.net && f.layer === z.layer);
-    if (hit) { z.filled = hit.polys; filled++; }
+  if (fills.length) {
+    board.zones = fills.map((f) => ({ uuid: f.uuid || crypto.randomUUID(), net: f.net, layer: f.layer, polygon: f.outline, filled: f.polys.length ? f.polys : undefined }));
+    filled = fills.filter((f) => f.polys.length).length;
   }
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2), unit);
   return { tracks: tracks.length, vias: vias.length, filled, moved, added, dropped, texts: texts.length };
