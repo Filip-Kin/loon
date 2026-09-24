@@ -15,7 +15,7 @@ const H = 133;
 const GAP_X = 1.1;     // between parts in a row: standing chips 3 mm apart, so their references clear
 const GAP_Y = 1.8;     // between rows: room for a 0.8 mm reference above each part
 const CELLS = { cx: 44, cy: 59 }; // holders x 6..82 on the back; pins come through at y ~39.5 and ~77.5, BT1's locating hole at x 7.5
-const LANES = { topLaneX0: 8.0, botLaneX0: 24.8, midX0: 2.3, topJogY: 13, botJogY: 118 }; // Ethernet lanes: past J6's left peg, past J5's right peg, down the left edge between
+const LANES = { laneX0: 8.0, midX0: 2.0, topJogY: 13, botJogY: 119 }; // Ethernet lanes: past J6's left peg, past J5's right peg, down the left edge between
 
 // #region layout
 // A block is rows of parts, laid left to right from its top-left corner.
@@ -37,8 +37,8 @@ const BLOCKS: Block[] = [
   // their right, the VIN caps at the right end by the VIN via.
   { name: "buck15", at: [5.5, 16.6], rows: [
     ["C40", "U4", "L4", "_5.3", "C45", "C46", "C47"],
-    ["R96", "U43", "U42", "R97", "R98", "R99", "R40", "R41", "R92", "C44"],
-    ["Q7", "U7", "C7", "D40", "C116", "C117", "C118", "C43", "C42", "C41"],
+    ["R96", "_0.5", "U43", "U42", "R97", "R98", "R99", "R40", "R41", "R92", "C44"],
+    ["Q7@180", "_0.5", "U7", "C7", "D40", "C116", "C117", "C118", "C43", "C42", "C41"],
   ] },
   // MCU with its decoupling beside it and the 3.3 V LDO (U30).
   { name: "mcu", at: [49, 15], gap: 1.0, rows: [
@@ -150,7 +150,7 @@ for (const h of holes) taken.push({ r: { x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2:
 for (const q of cellPads) taken.push({ r: { x1: q.x - 2.2, y1: q.y - 2.2, x2: q.x + 2.2, y2: q.y + 2.2 }, what: "cell pin" });
 // the front-side jogs and vias beside each jack
 taken.push({ r: { x1: 7, y1: 8, x2: 12, y2: 13.5 }, what: "ethernet jog" });
-taken.push({ r: { x1: 22, y1: H - 14.5, x2: 29, y2: H - 8 }, what: "ethernet jog" });
+taken.push({ r: { x1: 7, y1: H - 17.5, x2: 30, y2: H - 8 }, what: "ethernet jog" });
 
 for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref)!; const r = rectOf(f, fpOf(f)); console.log(`  ${ref.padEnd(4)} rot ${String(f.rotation).padStart(3)}  x ${r.x1.toFixed(1)}-${r.x2.toFixed(1)}  y ${r.y1.toFixed(1)}-${r.y2.toFixed(1)}`); }
 if (process.env.PLACE_DEBUG) for (const ref of process.env.PLACE_DEBUG.split(",")) { const f = board.footprints.find((x) => x.ref === ref)!; const fp = fpOf(f); console.log(`  ${ref}: courtyard ${JSON.stringify(fp.courtyard)} bbox ${JSON.stringify(fp.bbox)}`); }
@@ -265,11 +265,11 @@ if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
   // the pack switch and the fan. A column on the back at x 59.9 beside the
   // VIN column, and a bus along y 74.6 to the left that hops to the front
   // over the VIN column and over the Ethernet lanes.
-  B("+12V", [{ x: 59.9, y: 40.9 }, { x: 59.9, y: 124.1 }, { x: 62.3, y: 126.5 }]);
-  via("+12V", 59.9, 40.9); via("+12V", 59.9, 86); via("+12V", 59.9, 107); via("+12V", 62.3, 126.5);
+  B("+12V", [{ x: 59.9, y: 40.9 }, { x: 59.9, y: 124.1 }, { x: 62.6, y: 126.8 }, { x: 63.5, y: 126.8 }]);
+  via("+12V", 59.9, 40.9); via("+12V", 59.9, 86); via("+12V", 59.9, 107); via("+12V", 63.5, 126.8);
   F("+12V", [{ x: 59.9, y: 86 }, padAt("C22", "1")], 1.2);
   const l20 = padAt("L20", "1");
-  F("+12V", [{ x: 62.3, y: 126.5 }, { x: 62.3, y: l20.y + 0.7 }, { x: l20.x, y: l20.y + 0.7 }], 1.2);
+  F("+12V", [{ x: 63.5, y: 126.8 }, { x: 63.5, y: l20.y }], 1.2);   // straight up into the inductor's pad
   via("+12V", 59.9, 74.6); F("+12V", [{ x: 59.9, y: 74.6 }, { x: 55, y: 74.6 }], 2.0); via("+12V", 55, 74.6);
   B("+12V", [{ x: 55, y: 74.6 }, { x: 9, y: 74.6 }]);
   const c98 = padAt("C98", "1"), c97 = padAt("C97", "1");
@@ -280,10 +280,14 @@ if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
   const j8 = padAt("J8", "1");
   B("+12V", [{ x: 9, y: 74.6 }, { x: 9, y: 80 }, { x: j8.x, y: 80 + (9 - j8.x) }, j8], 1.0);
 
-  // LAPTOP_OUT: the output FET to the laptop jack along the front, in the
-  // strip between the jacks and the laptop buck.
+  // LAPTOP_OUT: the output FET (turned so its drain pins face east) to the
+  // laptop jack: through the 1.6 mm gap beside it, down to the back for the
+  // climb past the buck's rows, back up in the strip between the jacks and
+  // the buck. Keeps it off the Ethernet lanes at the left edge.
   const q7 = padAt("Q7", "3"), j3 = padAt("J3", "1");
-  F("LAPTOP_OUT", [q7, { x: 4.6, y: q7.y }, { x: 4.6, y: 16 }, { x: j3.x, y: 16 }, j3], 1.2);
+  F("LAPTOP_OUT", [q7, { x: 13.7, y: q7.y }, { x: 13.7, y: 31.3 }], 1.0); via("LAPTOP_OUT", 13.7, 31.3);
+  B("LAPTOP_OUT", [{ x: 13.7, y: 31.3 }, { x: 13.7, y: 15.5 }], 1.2); via("LAPTOP_OUT", 13.7, 15.5);
+  F("LAPTOP_OUT", [{ x: 13.7, y: 15.5 }, { x: 13.7, y: 16 }, { x: j3.x, y: 16 }, j3], 1.2);
 
   // PORT_P / PORT_N escape from the radio jack: pins 4/5 and 7/8 joined by
   // short diagonals, pin 5 out under the jack and up the left strip, pin 8
@@ -291,9 +295,11 @@ if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
   const p4 = padAt("J5", "4"), p5 = padAt("J5", "5"), p7 = padAt("J5", "7"), p8 = padAt("J5", "8");
   seg("B.Cu", 0.5, "PORT_P", [p4, p5]); seg("B.Cu", 0.5, "PORT_N", [p8, p7]);
   const d22p = padAt("D22", "1"), d22n = padAt("D22", "2");
-  seg("B.Cu", 1.0, "PORT_P", [p4, { x: p4.x, y: 118.5 }]); via("PORT_P", p4.x, 118.5);
-  F("PORT_P", [{ x: p4.x, y: 118.5 }, { x: p4.x, y: 105.6 }, { x: d22p.x, y: 105.6 }, d22p], 1.0);
-  F("PORT_N", [p8, { x: p8.x, y: 112 }, { x: d22n.x, y: 112 }, d22n], 1.0);
+  // pin 5 out under the jack (west of the Ethernet strips) and up the left
+  // strip at x 6.7 straight into the TVS; pin 8 west along the pin row,
+  // under pair 3/6's row, and up at x 8.0
+  F("PORT_P", [p5, { x: p5.x, y: H - 2 }, { x: 6.7, y: H - 2 }, { x: 6.7, y: d22p.y }, d22p], 0.8);
+  F("PORT_N", [p8, { x: 8.0, y: p8.y }, { x: 8.0, y: 112 }, { x: d22n.x, y: 112 }, d22n], 0.8);
   console.log(`hand routes: ${board.tracks.length} segments, ${board.vias.length} vias`);
 }
 

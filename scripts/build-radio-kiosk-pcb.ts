@@ -158,7 +158,7 @@ for (const g of GROUPS) {
   console.log(`${g.name.padEnd(8)} ${members.length.toString().padStart(3)} parts  ${bw.toFixed(0).padStart(2)} x ${bh.toFixed(0).padStart(2)} mm  at (${best.x}, ${best.y})${moved > 0.5 ? `  moved ${moved.toFixed(0)} mm from (${t.x}, ${t.y})` : ""}`);
 }
 
-preRouteEthernet(p, H, { topLaneX0: 8.0, botLaneX0: 24.8, midX0: 2.0, topJogY: 13, botJogY: H - 14 });
+preRouteEthernet(p, H, { laneX0: 8.0, midX0: 2.0, topJogY: 13, botJogY: H - 13 });
 addSilk(board, SILK);
 const { rats } = checkBoard(p, W, H);
 await writeBoard(p, project, placeOnly);
