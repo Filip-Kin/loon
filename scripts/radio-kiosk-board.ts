@@ -165,107 +165,149 @@ export function placeHoles(p: Prepared, W: number, H: number, inset = 4): Placed
   return holes;
 }
 
-// #region Ethernet pairs, hand-routed down the back to the right of the jacks
+// #region Ethernet pairs, hand-routed down the left edge on the back
 // Freerouting keeps existing copper, so these four tracks are the pass-through
 // as built. The RJ45 pins sit in two staggered rows 1.78 mm apart with 1.52 mm
 // pads, so a track cannot pass between them: the pin nearer the board leaves
-// on a row 1.3 mm off the pins, running east to its lane; the pin nearer the
-// edge goes out to the edge strip, along it over the jack's peg and straight
-// into its lane. Lanes sit just past the peg (x 29-31), which leaves the
-// PoE pins (4/5, 7/8, the leftmost) free to leave on the left. Pair 1/2 is
-// on B.Cu throughout; pair 3/6 jogs at each jack on F.Cu and drops through
-// vias past pair 1/2's rows. 0.3 mm on 0.5 mm centres,
-// pairs 1 mm apart, 45-degree mitres. The near track of each pair is
-// shorter and gets trombone bumps on its rows until matched.
-export function preRouteEthernet(p: Prepared, H: number, laneX0: number) {
+// on a row 1.3 mm off the pins, the pin nearer the edge goes out to the edge
+// strip, over a peg and back to its own row. At the laptop jack (top) the
+// rows run west to lanes past the left peg; at the radio jack (bottom) they
+// run EAST to lanes past the right peg, which leaves the PoE pins 4/5 and
+// 7/8 (the leftmost) a way out up the middle of the jack. Between the two
+// the lanes sit against the left edge, joined by 45-degree runs. Track order
+// along the lanes is 1, 2, 3, 6 at both ends, so nothing swaps. 0.3 mm on
+// 0.5 mm centres, pairs 1 mm apart, 45-degree mitres. Where a near row would
+// cross the other pair's lane it goes on the front and drops through a via.
+// The near track of each pair is shorter and gets trombone bumps.
+export function preRouteEthernet(p: Prepared, H: number, o: { topLaneX0: number; botLaneX0: number; midX0: number; topJogY: number; botJogY: number }) {
   const { board, fpOf } = p;
   const padOf = (ref: string, net: string) => {
     const f = board.footprints.find((x) => x.ref === ref)!;
     const pad = fpOf(f).pads.find((q) => f.padNets[q.number] === net)!;
     return padWorld(f, pad.at);
   };
-  const PAIRS: [string, string][] = [["ETH_1", "ETH_2"], ["ETH_3", "ETH_6"]];
-  const W_ETH = 0.3, M = 0.8, OFF = 1.3, EDGE_Y = 1.3, PITCH = 0.5, PAIR_GAP = 1.0;
+  const pegs = (ref: string) => { const f = board.footprints.find((x) => x.ref === ref)!; return fpOf(f).pads.filter((q) => q.type === "np_thru_hole").map((q) => ({ ...padWorld(f, q.at), r: (q.drill ?? 3) / 2 })).sort((u, v) => u.x - v.x); };
+  const W_ETH = 0.3, M = 0.8, OFF = 1.3, EDGE_Y = 1.8, PITCH = 0.5, PAIR_GAP = 1.0;
   const len = (pts: Point[]) => pts.slice(1).reduce((s, q, i) => s + Math.hypot(q.x - pts[i].x, q.y - pts[i].y), 0);
-  const ys = (ref: string) => { const f = board.footprints.find((x) => x.ref === ref)!; const v = fpOf(f).pads.filter((q) => q.type === "thru_hole").map((q) => padWorld(f, q.at).y); return (Math.min(...v) + Math.max(...v)) / 2; };
-  const mid6 = ys("J6"), mid5 = ys("J5");
-  const nearRow6 = Math.max(...PAIRS[0].map((n) => padOf("J6", n).y)) + OFF;
-  const nearRow5 = Math.min(...PAIRS[0].map((n) => padOf("J5", n).y)) - OFF;
-  type Tr = { n: string; jogLayer: string; laneX: number; top: Point[]; lane: Point[]; bot: Point[]; vias: Point[]; near: boolean; a: Point; q: Point; rowTop: number; rowBot: number };
-  const plan: Tr[] = [];
-  PAIRS.forEach((pair, pi) => pair.forEach((n, i) => {
-    // near track inside (west), far track outside: the near row turns down
-    // before it reaches the far lane
-    const laneX = laneX0 + pi * (PITCH + PAIR_GAP) + (1 - i) * PITCH;
+  const NETS = ["ETH_1", "ETH_2", "ETH_3", "ETH_6"];         // lane order, west to east
+  const off = (k: number) => k * PITCH + (k >= 2 ? PAIR_GAP : 0);
+  const peg6 = pegs("J6")[0], peg5 = pegs("J5")[1];          // left peg at the top, right peg at the bottom
+  const hop6 = peg6.x - peg6.r - 0.6, hop5 = peg5.x + peg5.r + 0.6;
+  const near6 = (n: string) => padOf("J6", n).y > 7.8, near5 = (n: string) => padOf("J5", n).y < H - 7.8;
+  const nearRow6 = Math.max(...NETS.filter(near6).map((n) => padOf("J6", n).y)) + OFF;
+  const nearRow5 = Math.min(...NETS.filter(near5).map((n) => padOf("J5", n).y)) - OFF;
+  const farRow5 = Math.max(...NETS.map((n) => padOf("J5", n).y)) - OFF;   // just above the far pads, east of them all
+  type Seg = { layer: string; pts: Point[] };
+  type Tr = { n: string; k: number; segs: Seg[]; vias: Point[]; near: boolean; topRow?: { y: number; x0: number; x1: number; dir: 1 | -1 }; botRow?: { y: number; x0: number; x1: number; dir: 1 | -1 } };
+  const plan: Tr[] = NETS.map((n, k) => {
     const a = padOf("J6", n), q = padOf("J5", n);
-    const near = a.y > mid6;
-    const rowTop = near ? a.y + OFF : EDGE_Y;
-    const rowBot = near ? q.y - OFF : H - EDGE_Y;
-    // pair 3/6's far track comes down 0.4 mm outside its lane to its via,
-    // so the near track's lane beside it stays clear of that via
-    const dx = pi === 1 && !near ? 0.4 : 0;
-    const top: Point[] = near
-      ? [a, { x: a.x, y: rowTop - M }, { x: a.x + M, y: rowTop }, { x: laneX - M, y: rowTop }, { x: laneX, y: rowTop + M }]
-      : [a, { x: a.x, y: EDGE_Y + M }, { x: a.x + M, y: EDGE_Y }, { x: laneX + dx - M, y: EDGE_Y }, { x: laneX + dx, y: EDGE_Y + M }];
-    const bot: Point[] = near
-      ? [{ x: laneX, y: rowBot - M }, { x: laneX - M, y: rowBot }, { x: q.x + M, y: rowBot }, { x: q.x, y: rowBot - M }, q]
-      : [{ x: laneX + dx, y: H - EDGE_Y - M }, { x: laneX + dx - M, y: H - EDGE_Y }, { x: q.x + M, y: H - EDGE_Y }, { x: q.x, y: H - EDGE_Y - M }, q];
-    const vias: Point[] = [];
-    if (pi === 1) {
-      // jog on the front, through to the back past pair 1/2's rows: the
-      // near track drops straight to its via 1 mm below its row; the far
-      // track's via is 1.4 mm lower and 0.4 mm outside, and its lane comes
-      // back in at 45 degrees below it.
-      const vTop = { x: laneX + dx, y: nearRow6 + (near ? 1.0 : 2.4) }, vBot = { x: laneX + dx, y: nearRow5 - (near ? 1.0 : 2.4) };
-      top.push(vTop); bot.unshift(vBot);
-      if (!near) { top.push({ x: laneX, y: vTop.y + dx }); bot.unshift({ x: laneX, y: vBot.y - dx }); }
-      vias.push(vTop, vBot);
+    const near = near6(n);
+    const segs: Seg[] = [], vias: Point[] = [];
+    const tx = o.topLaneX0 + off(k), bx = o.botLaneX0 + off(k), mx = o.midX0 + off(k);
+    // --- top jack: rows run west; pair 1/2 on the back, pair 3/6 jogs on the front ---
+    let topRow: Tr["topRow"], botRow: Tr["botRow"];
+    let laneTop: Point;
+    if (k < 2) {
+      if (near) {
+        const y = a.y + OFF;
+        segs.push({ layer: "B.Cu", pts: [a, { x: a.x, y: y - M }, { x: a.x - M, y }, { x: tx + M, y }, { x: tx, y: y + M }] });
+        topRow = { y, x0: a.x - M, x1: tx + M, dir: 1 };
+        laneTop = { x: tx, y: y + M };
+      } else {
+        const y = a.y - OFF;
+        segs.push({ layer: "B.Cu", pts: [a, { x: a.x, y: EDGE_Y + M }, { x: a.x - M, y: EDGE_Y }, { x: hop6 + M, y: EDGE_Y }, { x: hop6, y: EDGE_Y + M }, { x: hop6, y: y - M }, { x: hop6 - M, y }, { x: tx + M, y }, { x: tx, y: y + M }] });
+        laneTop = { x: tx, y: y + M };
+      }
+    } else if (near) {
+      // front row to a via 1 mm below pair 1/2's near row, straight down
+      const y = a.y + OFF, v = { x: tx, y: nearRow6 + 1.0 };
+      segs.push({ layer: "F.Cu", pts: [a, { x: a.x, y: y - M }, { x: a.x - M, y }, { x: tx + M, y }, { x: tx, y: y + M }, v] });
+      topRow = { y, x0: a.x - M, x1: tx + M, dir: 1 };
+      vias.push(v); laneTop = v;
+    } else {
+      // front all the way from the edge strip, via 0.4 mm outside (west of) the lane and 1.4 mm lower
+      const v = { x: tx - 0.4, y: nearRow6 + 2.4 };
+      segs.push({ layer: "F.Cu", pts: [a, { x: a.x, y: EDGE_Y + M }, { x: a.x - M, y: EDGE_Y }, { x: hop6 + M, y: EDGE_Y }, { x: hop6, y: EDGE_Y + M }, { x: hop6, y: a.y - OFF - M }, { x: hop6 - M, y: a.y - OFF }, { x: tx - 0.4 + M, y: a.y - OFF }, { x: tx - 0.4, y: a.y - OFF + M }, v] });
+      vias.push(v); laneTop = { x: tx, y: v.y + 0.4 };
+      segs.push({ layer: "B.Cu", pts: [v, laneTop] });
     }
-    const lane: Point[] = [top[top.length - 1], bot[0]];
-    plan.push({ n, jogLayer: pi === 0 ? "B.Cu" : "F.Cu", laneX, top, lane, bot, vias, near, a, q, rowTop, rowBot });
-  }));
-  // Trombones: bumps of depth h, top width w, corners m, each adding about
-  // 2h - 4m(2 - sqrt2), between the pad and the lane on the near track's
-  // rows, away from the jack; depth solved once from the measured result.
-  const m = 0.4, w = 1.2, hMax = 4.0, step = w + 2 * m + 0.8;
-  const bumps = (t: Tr, top: boolean, nb: number, h: number): Point[] => {
-    const y = top ? t.rowTop : t.rowBot, dir = top ? 1 : -1, padX = top ? t.a.x : t.q.x;
-    const x0 = padX + M + 0.6;
-    const row: Point[] = [{ x: padX + M, y }];
+    // --- bottom jack: rows run east; far tracks on the back over the right peg, near tracks on the front to a via ---
+    let laneBot: Point;
+    if (!near5(n)) {
+      // both far tracks are on the back here: pin 3 (west) takes the outer
+      // strip, hop and row, pin 1 the inner, 0.5 mm apart
+      const outer = k >= 2 ? 0.5 : 0;
+      const y = farRow5 - outer, sy = H - EDGE_Y + outer, hx = hop5 + outer;
+      segs.push({ layer: "B.Cu", pts: [q, { x: q.x, y: sy - M }, { x: q.x + M, y: sy }, { x: hx - M, y: sy }, { x: hx, y: sy - M }, { x: hx, y: y + M }, { x: hx - M, y }, { x: bx + M, y }, { x: bx, y: y - M }] });
+      laneBot = { x: bx, y: y - M };
+    } else {
+      // pair 1/2's near row 1.3 above its pad, pair 3/6's 2.6 (it passes over the other's stub);
+      // the via sits between that row and the row above it, 0.7 mm outside the lane
+      const y = q.y - (k < 2 ? OFF : 2 * OFF), v = { x: bx + 0.7, y: y - 0.6 };
+      segs.push({ layer: "F.Cu", pts: [q, { x: q.x, y: y + M }, { x: q.x + M, y }, { x: bx + 0.7 - 0.6, y }, v] });
+      botRow = { y, x0: q.x + M, x1: bx + 0.1, dir: -1 };
+      vias.push(v); laneBot = { x: bx, y: v.y - 0.7 };
+      segs.push({ layer: "B.Cu", pts: [v, laneBot] });
+    }
+    // --- the lane: top lanes, a 45-degree run to the edge, the edge, a 45-degree run to the bottom lanes.
+    // Each track starts its run PITCH later than the one inside it, so the parallel diagonals stay 0.7 apart.
+    const jt = o.topJogY + off(k), jb = o.botJogY - off(k);
+    const dTop = tx - mx, dBot = bx - mx;
+    segs.push({ layer: "B.Cu", pts: [laneTop, { x: tx, y: jt }, { x: mx, y: jt + dTop }, { x: mx, y: jb - dBot }, { x: bx, y: jb }, laneBot] });
+    return { n, k, segs, vias, near, topRow, botRow };
+  });
+  // Trombones on the near track of each pair: bumps of depth h, top width w,
+  // corners m, each adding about 2h - 4m(2 - sqrt2), on its rows between the
+  // pad and the lane, away from the jack. Depth solved once from the result.
+  const m = 0.4, w = 1.2, hMax = 4.5, step = w + 2 * m + 0.8; // 4.5: the bumps stay above the LAPTOP_OUT run at y 16
+  const total = (t: Tr) => t.segs.reduce((s, g) => s + len(g.pts), 0);
+  const bumps = (row: NonNullable<Tr["topRow"]>, nb: number, h: number, awayDir: 1 | -1): Point[] => {
+    // row.dir 1: pad is east of the lane (top jack), the row runs from x0 (pad side) west to x1
+    const y = row.y, start = row.dir === 1 ? row.x0 - 0.6 : row.x0 + 0.6;
+    const out: Point[] = [];
     for (let i = 0; i < nb; i++) {
-      const xa = x0 + i * step, xb = xa + w + 2 * m;
-      row.push({ x: xa, y }, { x: xa + m, y: y + dir * m }, { x: xa + m, y: y + dir * (h - m) }, { x: xa + 2 * m, y: y + dir * h }, { x: xb - 2 * m, y: y + dir * h }, { x: xb - m, y: y + dir * (h - m) }, { x: xb - m, y: y + dir * m }, { x: xb, y });
+      const xa = row.dir === 1 ? start - i * step : start + i * step, xb = row.dir === 1 ? xa - (w + 2 * m) : xa + (w + 2 * m);
+      const s1 = row.dir === 1 ? -1 : 1;
+      out.push({ x: xa, y }, { x: xa + s1 * m, y: y + awayDir * m }, { x: xa + s1 * m, y: y + awayDir * (h - m) }, { x: xa + s1 * 2 * m, y: y + awayDir * h }, { x: xb - s1 * 2 * m, y: y + awayDir * h }, { x: xb - s1 * m, y: y + awayDir * (h - m) }, { x: xb - s1 * m, y: y + awayDir * m }, { x: xb, y });
     }
-    return row;
+    return out;
   };
-  const total = (t: Tr) => len(t.top) + len(t.lane) + len(t.bot);
-  for (const pair of PAIRS) {
-    const [t, u] = pair.map((n) => plan.find((x) => x.n === n)!);
+  for (const pi of [0, 1]) {
+    const [t, u] = [plan[2 * pi], plan[2 * pi + 1]];
     const short = t.near ? t : u, long = short === t ? u : t;
     const skew = total(long) - total(short);
     if (skew < 0.15) continue;
-    const laneEnd = short.laneX;
-    const cap = Math.max(0, Math.floor((laneEnd - M - 0.3 - (Math.max(short.a.x, short.q.x) + M + 0.6)) / step));
+    const rows = [short.topRow].filter((r): r is NonNullable<Tr["topRow"]> => !!r); // not the bottom rows: the PoE pins leave under them
+    const caps = rows.map((r) => Math.max(0, Math.floor((Math.abs(r.x1 - r.x0) - 1.2) / step)));
     const perBump = (h: number) => 2 * h - 4 * m * (2 - Math.SQRT2);
     let nb = Math.max(1, Math.ceil(skew / perBump(hMax)));
-    if (nb > 2 * cap) { console.log(`ethernet: ${short.n} needs ${nb} bumps, room for ${2 * cap}`); nb = 2 * cap; }
-    const nTop = Math.min(cap, nb), nBot = nb - nTop;
-    const top0 = short.top.slice(), bot0 = short.bot.slice();
+    const room = caps.reduce((a, b) => a + b, 0);
+    if (nb > room) { console.log(`ethernet: ${short.n} needs ${nb} bumps, room for ${room}`); nb = room; }
+    if (!nb) continue;
+    const base = short.segs.map((g) => ({ layer: g.layer, pts: g.pts.slice() }));
     const build = (hh: number) => {
-      // the row is points 2..3 of a near-pin top (pad side first) and the
-      // last-3rd..last-2nd of its bot
-      short.top = top0.slice(); short.bot = bot0.slice();
-      if (nTop) short.top.splice(2, 1, ...bumps(short, true, nTop, hh));
-      if (nBot) short.bot.splice(short.bot.length - 3, 1, ...bumps(short, false, nBot, hh).reverse());
+      short.segs = base.map((g) => ({ layer: g.layer, pts: g.pts.slice() }));
+      let left = nb;
+      rows.forEach((row, ri) => {
+        const n = Math.min(caps[ri], left); left -= n;
+        if (!n) return;
+        const away: 1 | -1 = ri === 0 ? 1 : -1;
+        // the row is the segment whose two points sit at y == row.y; splice the bumps in after its first point
+        for (const g of short.segs) {
+          const i = g.pts.findIndex((pt, j) => j + 1 < g.pts.length && Math.abs(pt.y - row.y) < 1e-6 && Math.abs(g.pts[j + 1].y - row.y) < 1e-6);
+          if (i < 0) continue;
+          g.pts.splice(i + 1, 0, ...bumps(row, n, hh, away));
+          break;
+        }
+      });
     };
     let h = (skew / nb + 4 * m * (2 - Math.SQRT2)) / 2;
     build(h);
     h += (total(long) - total(short)) / (2 * nb);
     build(h);
   }
-  const seg = (layer: string, pts: Point[], net: string) => { for (let i = 1; i < pts.length; i++) board.tracks.push({ uuid: crypto.randomUUID(), layer, width: W_ETH, start: pts[i - 1], end: pts[i], net }); };
   for (const t of plan) {
-    seg(t.jogLayer, t.top, t.n); seg("B.Cu", t.lane, t.n); seg(t.jogLayer, t.bot, t.n);
+    for (const g of t.segs) for (let i = 1; i < g.pts.length; i++) board.tracks.push({ uuid: crypto.randomUUID(), layer: g.layer, width: W_ETH, start: g.pts[i - 1], end: g.pts[i], net: t.n });
     for (const v of t.vias) board.vias.push({ uuid: crypto.randomUUID(), at: v, size: 0.6, drill: 0.3, net: t.n });
   }
   const L = Object.fromEntries(plan.map((t) => [t.n, total(t)]));
