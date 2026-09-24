@@ -593,7 +593,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
           {board.footprints.length} parts · {rats.length} unrouted · {board.tracks.length} tracks
           {errors ? ` · ${errors} DRC errors` : unrouted || drc.length ? " · DRC clean" : ""}
         </span>
-        <span className="status">{board.rules.name}</span>
+        <span className="status desktop-only">{board.rules.name}</span>
       </div>
       {progress?.running && Date.now() - progress.updatedAt < 60_000 && <RouteBar p={progress} />}
       {diskAhead && (
@@ -848,7 +848,9 @@ function LayerBox({ on, setOn, vis, solo }: {
       const raw = localStorage.getItem("loon.layerbox");
       if (raw) return JSON.parse(raw);
     } catch { /* first run */ }
-    return { x: -1, y: 96, open: true };
+    // On a phone the box is most of the board, so it starts shut there.
+    const narrow = typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches;
+    return { x: -1, y: 96, open: !narrow };
   });
   useEffect(() => { try { localStorage.setItem("loon.layerbox", JSON.stringify(box)); } catch {} }, [box]);
   const dragging = useRef<{ mx: number; my: number; x: number; y: number } | null>(null);

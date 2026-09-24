@@ -173,8 +173,9 @@ export function BlockCanvas(props: Props) {
           {adding ? "Pick a block" : "Add block"}
         </button>
         <span className="status">
-          {graph.segments.length} blocks · {graph.links.length} links · {schem.symbols.length} parts
+          {graph.segments.length} blocks · {graph.links.length} links
         </span>
+        <span className="status desktop-only">{schem.symbols.length} parts</span>
         <span className="spacer" />
         <div className="kindkey">
           {KIND_ORDER.filter((k) => graph.segments.some((s) => s.kind === k)).map((k) => (

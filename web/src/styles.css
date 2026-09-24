@@ -47,11 +47,18 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 
 .app { display: grid; grid-template-rows: 44px 1fr; height: 100%; }
 
+/* Below the breakpoint the bar keeps the brand and the button; everything else
+   moves into a drawer. A horizontal bar that does not fit pushes the document
+   wider than the screen. */
+.hamburger { display: none; }
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 25; }
+
 .topbar {
   display: flex; align-items: center; gap: 12px;
   padding: 0 12px; border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
+.barinner { display: contents; }
 .brand { font-weight: 600; letter-spacing: -0.02em; font-size: 16px; }
 .brand span { color: var(--accent); }
 .topbar .spacer { flex: 1; }
@@ -230,11 +237,43 @@ svg.canvas.panning { cursor: grabbing; }
 /* #region mobile */
 .mobile-tabbar { display: none; }
 
-@media (max-width: 820px) {
+@media (max-width: 860px) {
   body { font-size: 15px; }
-  .topbar { gap: 8px; overflow-x: auto; }
-  .topbar .desktop-only { display: none; }
-  .topbar select { max-width: 44vw; }
+  /* Anything marked desktop-only is gone at this width, wherever it sits. */
+  .desktop-only { display: none; }
+  .topbar { gap: 8px; }
+  .topbar select { max-width: 100%; }
+
+  /* #region hamburger */
+  .hamburger {
+    display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 4px;
+    margin-left: auto; width: 40px; height: 34px; padding: 0 9px;
+  }
+  .hamburger span { display: block; width: 100%; height: 2px; background: var(--text); border-radius: 2px; }
+  .barinner {
+    display: none;
+    position: fixed; top: 44px; left: 0; right: 0; z-index: 30;
+    flex-direction: column; align-items: stretch; gap: 10px;
+    padding: 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+    max-height: calc(100vh - 100px); overflow-y: auto;
+  }
+  .topbar.navopen .barinner { display: flex; }
+  .barinner > * { width: 100%; }
+  .barinner .spacer { display: none; }
+  .barinner .viewswitch { display: flex; }
+  .barinner .viewswitch button { flex: 1; }
+  .barinner .savestate { text-align: center; }
+
+  /* The view chooser, above the tab bar that opens it. */
+  .viewmenu {
+    position: fixed; left: 8px; right: 8px; bottom: 64px; z-index: 30;
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
+    overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  }
+  .viewmenu button { border: 0; border-radius: 0; background: transparent; padding: 14px; text-align: left; }
+  .viewmenu button + button { border-top: 1px solid var(--line); }
+  .viewmenu button.on { background: var(--accent); color: #fff; }
 
   .workspace.mobile { display: block; position: relative; }
   .workspace.mobile > * { position: absolute; inset: 0 0 56px 0; width: auto; display: none; border: none; }
@@ -252,6 +291,21 @@ svg.canvas.panning { cursor: grabbing; }
     color: var(--text-dim); font-size: 12px; border-top: 2px solid transparent;
   }
   .mobile-tabbar button.on { color: var(--text); border-top-color: var(--accent); }
+
+  /* A phone has no keyboard, so the key legend is dead pixels, and the layout
+     bar needs the height the legend was using. */
+  .pcbhint { display: none; }
+  /* The colour key is three rows of the screen on a phone; the kind is on the
+     block's own panel when you tap it. */
+  .kindkey { display: none; }
+  .blockbar { gap: 8px; padding: 6px; }
+  .blockbar .status { font-size: 12px; }
+  .pcbbar { gap: 6px; padding: 6px; }
+  .pcbbar .linkbtn, .pcbbar button, .pcbbar select { padding: 6px 8px; font-size: 13px; }
+  .layerpanel { max-width: calc(100vw - 24px); }
+  .blockdetail { width: calc(100vw - 24px); right: 12px; }
+  .renderpane img { max-width: 100%; }
+  .textbox { left: 8px; right: 8px; width: auto; bottom: 68px; }
 
   /* Bigger touch targets in the panels. */
   .ai .composer textarea { height: 72px; }

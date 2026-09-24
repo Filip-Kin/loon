@@ -19,6 +19,15 @@ import type { Op, PinRef } from "@loon/shared/ops";
 import type { PartSummary } from "@loon/shared/parts";
 import type { ProjectMeta } from "../../server/src/services/storage";
 
+type View = "schematic" | "blocks" | "pcb" | "code" | "sim";
+const VIEWS: { id: View; label: string }[] = [
+  { id: "blocks", label: "Blocks" },
+  { id: "schematic", label: "Schematic" },
+  { id: "pcb", label: "PCB" },
+  { id: "code", label: "Code" },
+  { id: "sim", label: "Simulate" },
+];
+
 export function App() {
   const [parts, setParts] = useState<PartSummary[]>([]);
   const [defs, setDefs] = useState<Record<string, LibSymbol>>({});
@@ -43,7 +52,11 @@ export function App() {
   const [nets, setNets] = useState<{ name: string; isPower: boolean; pins: string[] }[]>([]);
   const [checking, setChecking] = useState(false);
   const [highlightNet, setHighlightNet] = useState<string | null>(null);
-  const [view, setView] = useState<"schematic" | "blocks" | "pcb" | "code" | "sim">("schematic");
+  const [view, setView] = useState<View>("schematic");
+  // Which view is showing, chosen from the bottom bar on a phone and the top
+  // bar on a desktop.
+  const [viewMenu, setViewMenu] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const [blockSel, setBlockSel] = useState<string | null>(null);
   const [blockViewport, setBlockViewport] = useState<Viewport>({ x: 40, y: 40, scale: 1.6 });
   // Bumped when the assistant touches the board or the firmware, so those views
@@ -53,7 +66,7 @@ export function App() {
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches);
   const [mobileView, setMobileView] = useState<"design" | "parts" | "panel">("design");
   // Sidebars fold away, because a board is wider than the gap between them.
   // Which ones were open is remembered, so the layout survives a reload.
@@ -353,7 +366,7 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-      if (e.key === "Escape") { setTool("select"); setPlacingLibId(null); return; }
+      if (e.key === "Escape") { setNavOpen(false); setViewMenu(false); setTool("select"); setPlacingLibId(null); return; }
       if (e.key.toLowerCase() === "w") { setTool("wire"); return; }
       if (e.key.toLowerCase() === "v") { setTool("select"); return; }
       if (selection) {
@@ -370,11 +383,15 @@ export function App() {
 
   // Track viewport size for the mobile layout.
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 820px)");
+    const mq = window.matchMedia("(max-width: 860px)");
     const onChange = () => setIsMobile(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  // The drawer and the view menu close whenever the view behind them changes,
+  // so neither is ever left open over something the user already moved on from.
+  useEffect(() => { setNavOpen(false); setViewMenu(false); }, [view, projectName, boardName]);
 
   function pickPart(libId: string) {
     setPlacingLibId(libId);
@@ -384,8 +401,17 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="topbar">
+      <div className={"topbar" + (navOpen ? " navopen" : "")}>
         <div className="brand">loon<span>.</span></div>
+        <button
+          className="hamburger"
+          aria-label="Menu"
+          aria-expanded={navOpen}
+          onClick={() => setNavOpen((o) => !o)}
+        >
+          <span /><span /><span />
+        </button>
+        <div className="barinner">
         <select value={projectName} onChange={(e) => openProject(e.target.value)}>
           {projects.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
           {!projects.find((p) => p.name === projectName) && <option value={projectName}>{projectName}</option>}
@@ -413,11 +439,9 @@ export function App() {
         </span>
         <div className="desktop-only" style={{ width: 1, height: 22, background: "var(--line)" }} />
         <div className="viewswitch">
-          <button className={view === "blocks" ? "on" : ""} onClick={() => setView("blocks")}>Blocks</button>
-          <button className={view === "schematic" ? "on" : ""} onClick={() => setView("schematic")}>Schematic</button>
-          <button className={view === "pcb" ? "on" : ""} onClick={() => setView("pcb")}>PCB</button>
-          <button className={view === "code" ? "on" : ""} onClick={() => setView("code")}>Code</button>
-          <button className={view === "sim" ? "on" : ""} onClick={() => setView("sim")}>Simulate</button>
+          {VIEWS.map((v) => (
+            <button key={v.id} className={view === v.id ? "on" : ""} onClick={() => setView(v.id)}>{v.label}</button>
+          ))}
         </div>
         {view === "schematic" && <button className={"desktop-only " + (tool === "select" ? "primary" : "")} onClick={() => { setTool("select"); setPlacingLibId(null); }}>Select</button>}
         {view === "schematic" && <button className={"desktop-only " + (tool === "wire" ? "primary" : "")} onClick={() => setTool("wire")}>Wire</button>}
@@ -436,8 +460,10 @@ export function App() {
         <button className="desktop-only" onClick={() => { fittedFor.current = ""; setSchem((s) => (s ? { ...s } : s)); }} title="Fit the whole sheet">Fit</button>
         <button className="desktop-only" onClick={undo}>Undo</button>
         <button className="desktop-only" onClick={redo}>Redo</button>
-        <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "loading..."}</span>
+        <span className="status desktop-only">{schem ? `${schem.symbols.length} parts, ${schem.wires.length} wires` : "Loading…"}</span>
+        </div>
       </div>
+      {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 
       <div
         className={"workspace" + (isMobile ? " mobile" : "") + (sidebars.left ? "" : " no-left") + (sidebars.right ? "" : " no-right")}
@@ -532,9 +558,34 @@ export function App() {
         )}
       </div>
 
+      {isMobile && viewMenu && (
+        <>
+          <div className="scrim" onClick={() => setViewMenu(false)} />
+          <div className="viewmenu" role="menu">
+            {VIEWS.map((v) => (
+              <button
+                key={v.id}
+                role="menuitem"
+                className={view === v.id ? "on" : ""}
+                onClick={() => { setView(v.id); setViewMenu(false); setMobileView("design"); }}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       {isMobile && (
         <div className="mobile-tabbar">
-          <button className={mobileView === "design" ? "on" : ""} onClick={() => setMobileView("design")}>Design</button>
+          <button
+            className={mobileView === "design" ? "on" : ""}
+            aria-haspopup="menu"
+            aria-expanded={viewMenu}
+            onClick={() => { if (mobileView !== "design") { setMobileView("design"); return; } setViewMenu((v) => !v); }}
+          >
+            {VIEWS.find((v) => v.id === view)?.label ?? "Design"} ▾
+          </button>
           <button className={mobileView === "parts" ? "on" : ""} onClick={() => setMobileView("parts")}>Parts</button>
           <button className={mobileView === "panel" ? "on" : ""} onClick={() => { setMobileView("panel"); if (rightTab === "props") setRightTab("ai"); }}>Assistant</button>
         </div>
