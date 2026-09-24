@@ -1275,7 +1275,7 @@ export function buildRadioKiosk(): Schematic {
     L20: "C2847586", // MDA1365-330M
     D1: "C148220", D2: "C148227", // SMAJ22A, SMAJ28A
     D20: "C15874", // SS310
-    D21: "C2099", // 1N4148W
+    D21: "C81598", // 1N4148W, basic library
     D22: "C10762", // SMAJ58A
     F1: "C2838912", // 1206TD-2A
     C97: "C346948", C98: "C346948", // 470u/25V D10x10
@@ -1303,11 +1303,11 @@ export function buildRadioKiosk(): Schematic {
     RT1: "C13564", // NCP18XH103F03RB
     J13: "C2316", // XH-3A
     SW1: "C231329", SW2: "C231329", // B3U-1000P
-    U40: "C2969805", // STM32F072CBT6 (genuine: JLC stock 0, consign from DigiKey; APM32/FCM32 clones in stock are not it)
+    U40: "C81720", // STM32F072CBT6 genuine, in stock at JLC (the -TR reel code C2969805 is not)
     U41: "C122228", // INA180A1IDBVR
     U42: "C122228", // INA180A1IDBVR
     U43: "C116490", // MCP6001T-I/OT
-    D40: "C2099", // 1N4148W
+    D40: "C81598", // 1N4148W, basic library
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
   for (const [ref, code] of Object.entries(lcsc)) {
