@@ -8,16 +8,19 @@
 
 import { join } from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { storage } from "./storage";
-import { parse, findAll, find } from "@loon/shared/sexpr";
+import { parse, findAll, find, value } from "@loon/shared/sexpr";
 import { readZoneFills } from "@loon/shared/kicad-pcb";
-import type { Board, Track, Via } from "@loon/shared/board";
+import { KICAD_IMAGE, KICAD_LIB_REF, KICAD_3DMODEL_VARS, KICAD_NET_SETTINGS_VERSION } from "@loon/shared/kicad-version";
+import type { Board, BoardText, Track, Via } from "@loon/shared/board";
+import type { Point } from "@loon/shared/schematic";
 
-const KICAD = process.env.LOON_KICAD_IMAGE ?? "ghcr.io/kicad/kicad:9.0";
+const KICAD = process.env.LOON_KICAD_IMAGE ?? KICAD_IMAGE;
 const FREEROUTING = process.env.LOON_FREEROUTING_IMAGE ?? "ghcr.io/freerouting/freerouting:latest";
 const DOCKER = process.env.LOON_DOCKER_BIN ?? "docker";
 export const MODELS_DIR = process.env.LOON_3D_DIR ?? join(process.cwd(), "data", "3dmodels");
-const MODEL_REF = process.env.LOON_3D_REF ?? "9.0.8";
+const MODEL_REF = process.env.LOON_3D_REF ?? KICAD_LIB_REF;
 
 async function run(args: string[], timeoutMs: number): Promise<{ code: number; out: string }> {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
@@ -175,16 +178,21 @@ export async function writeNetClasses(project: string, unit: string, plan: NetCl
   // 0.18: the USB-C receptacle's pads sit 0.2 mm apart, and OSH Park and
   // JLC both allow 0.15.
   const def = { ...pro.net_settings.classes[0], clearance: 0.18 };
+  // net_settings v4 gives every class a priority; Default keeps INT_MAX so any
+  // named class wins the pattern match. The named ones are disjoint here, so
+  // the order is only a tie-break.
+  const named = (i: number) => ({ ...def, priority: i });
   pro.net_settings.classes = [
     def,
     // One clearance everywhere: the router and DRC must agree, and a wider
     // class clearance only shows up as DRC errors against the narrow one.
-    { ...def, name: "Heavy", track_width: 1.5, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
-    { ...def, name: "Wide", track_width: 1.2, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
-    { ...def, name: "Power", track_width: 0.6, clearance: 0.18, via_diameter: 0.8, via_drill: 0.4 },
-    { ...def, name: "Logic", track_width: 0.4, clearance: 0.2 },
-    { ...def, name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
+    { ...named(0), name: "Heavy", track_width: 1.5, clearance: 0.18, via_diameter: 1.0, via_drill: 0.5 },
+    { ...named(1), name: "Wide", track_width: 1.2, clearance: 0.18, via_diameter: 0.9, via_drill: 0.5 },
+    { ...named(2), name: "Power", track_width: 0.6, clearance: 0.18, via_diameter: 0.8, via_drill: 0.4 },
+    { ...named(3), name: "Logic", track_width: 0.4, clearance: 0.2 },
+    { ...named(4), name: "Ethernet", track_width: 0.3, clearance: 0.2, diff_pair_width: 0.3, diff_pair_gap: 0.2 },
   ];
+  pro.net_settings.meta = { ...(pro.net_settings.meta ?? {}), version: KICAD_NET_SETTINGS_VERSION };
   pro.net_settings.netclass_patterns = [
     ...(plan.heavy ?? []).map((n) => ({ netclass: "Heavy", pattern: n })),
     ...(plan.wide ?? []).map((n) => ({ netclass: "Wide", pattern: n })),
@@ -418,9 +426,11 @@ async function runDrcJson(project: string, unit: string): Promise<{ violations: 
   }
 }
 
-// Copper KiCad now holds (tracks, vias, zone fills) back into board.loon.json,
-// so the layout view shows the routed board.
-export async function syncFromKicad(project: string, unit = ""): Promise<{ tracks: number; vias: number; filled: number }> {
+// Everything KiCad now holds back into board.loon.json, so the layout view
+// shows the board as it is on disk. Copper after a route, and placement and
+// silkscreen after the user has had the board open in KiCad themselves - loon
+// does not own the file while it is in someone else's editor.
+export async function syncFromKicad(project: string, unit = ""): Promise<{ tracks: number; vias: number; filled: number; moved: number; texts: number }> {
   const text = await storage.readFile(project, "board.kicad_pcb", unit);
   const root = parse(text);
   const netNames = new Map<number, string>();
@@ -441,6 +451,58 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   const board = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
   board.tracks = tracks;
   board.vias = vias;
+
+  // Placement, matched by reference designator. A part KiCad does not have is
+  // left alone rather than dropped: the schematic owns which parts exist.
+  let moved = 0;
+  const placed = new Map<string, { at: Point; rotation: number; side: "F" | "B" }>();
+  for (const f of findAll(root, "footprint")) {
+    let ref = "";
+    for (const pr of findAll(f, "property")) {
+      if (pr.items[1]?.kind === "atom" && pr.items[1].value === "Reference" && pr.items[2]?.kind === "atom") ref = pr.items[2].value;
+    }
+    if (!ref) for (const t of findAll(f, "fp_text")) {
+      if (t.items[1]?.kind === "atom" && t.items[1].value === "reference" && t.items[2]?.kind === "atom") ref = t.items[2].value;
+    }
+    if (!ref) continue;
+    const at = find(f, "at");
+    const layer = value(f, "layer") ?? "F.Cu";
+    placed.set(ref, {
+      at: { x: num(at, 1), y: num(at, 2) },
+      rotation: (((at && at.items.length > 3 ? num(at, 3) : 0) % 360) + 360) % 360,
+      side: layer.startsWith("B.") ? "B" : "F",
+    });
+  }
+  for (const f of board.footprints) {
+    const p = placed.get(f.ref);
+    if (!p) continue;
+    if (f.at.x !== p.at.x || f.at.y !== p.at.y || f.rotation !== p.rotation || f.side !== p.side) moved++;
+    f.at = p.at;
+    f.rotation = p.rotation;
+    f.side = p.side;
+  }
+
+  // Free silkscreen, which is the one thing on the board with no source in the
+  // schematic, so KiCad's copy is the only copy.
+  const texts: BoardText[] = [];
+  for (const t of findAll(root, "gr_text")) {
+    const at = find(t, "at");
+    const eff = find(t, "effects");
+    const font = eff ? find(eff, "font") : undefined;
+    const size = font ? num(find(font, "size"), 1) : 1;
+    texts.push({
+      uuid: value(t, "uuid") ?? crypto.randomUUID(),
+      text: t.items[1]?.kind === "atom" ? t.items[1].value : "",
+      at: { x: num(at, 1), y: num(at, 2) },
+      rotation: at && at.items.length > 3 ? num(at, 3) : 0,
+      layer: value(t, "layer") ?? "F.SilkS",
+      size: size || 1,
+      thickness: font ? num(find(font, "thickness"), 1) || undefined : undefined,
+      bold: font ? !!find(font, "bold") : false,
+    });
+  }
+  board.texts = texts;
+
   const fills = readZoneFills(text);
   let filled = 0;
   for (const z of board.zones) {
@@ -448,7 +510,18 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (hit) { z.filled = hit.polys; filled++; }
   }
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2), unit);
-  return { tracks: tracks.length, vias: vias.length, filled };
+  return { tracks: tracks.length, vias: vias.length, filled, moved, texts: texts.length };
+}
+
+// #region disk watch
+// KiCad saves board.kicad_pcb behind loon's back. The editor polls this and
+// pulls the file in when it is newer than loon's own model of it.
+export async function boardDiskState(project: string, unit = ""): Promise<{ pcb: number; loon: number }> {
+  const dir = storage.projectDir(project, unit);
+  const at = async (name: string) => {
+    try { return (await stat(join(dir, name))).mtimeMs; } catch { return 0; }
+  };
+  return { pcb: await at("board.kicad_pcb"), loon: await at("board.loon.json") };
 }
 
 // #region 3D models
@@ -456,7 +529,10 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
 // not there is reported, not faked.
 export async function fetchModels(pcbText: string): Promise<{ fetched: number; missing: string[] }> {
   const refs = new Set<string>();
-  for (const m of pcbText.matchAll(/\(model "\$\{KICAD9_3DMODEL_DIR\}\/([^"]+)"/g)) refs.add(m[1]);
+  // The cache holds footprints from more than one library tag, and each tag
+  // names the model directory after its own KiCad. Read every name KiCad knows.
+  const varNames = KICAD_3DMODEL_VARS.join("|");
+  for (const m of pcbText.matchAll(new RegExp(`\\(model "\\$\\{(?:${varNames})\\}/([^"]+)"`, "g"))) refs.add(m[1]);
   let fetched = 0;
   const missing: string[] = [];
   for (const rel of refs) {
@@ -483,7 +559,8 @@ export async function renderBoard(project: string, unit = ""): Promise<{ images:
   const pcb = await storage.readFile(project, "board.kicad_pcb", unit);
   const models = await fetchModels(pcb);
   mkdirSync(join(MODELS_DIR, "lcsc.3dshapes"), { recursive: true });
-  const mounts = ["-v", `${dir}:/work`, "-v", `${join(MODELS_DIR, "kicad")}:/models/kicad:ro`, "-v", `${join(MODELS_DIR, "lcsc.3dshapes")}:/work/lcsc.3dshapes:ro`, "-e", "KICAD9_3DMODEL_DIR=/models/kicad", "-w", "/work"];
+  const modelEnv = KICAD_3DMODEL_VARS.flatMap((v) => ["-e", `${v}=/models/kicad`]);
+  const mounts = ["-v", `${dir}:/work`, "-v", `${join(MODELS_DIR, "kicad")}:/models/kicad:ro`, "-v", `${join(MODELS_DIR, "lcsc.3dshapes")}:/work/lcsc.3dshapes:ro`, ...modelEnv, "-w", "/work"];
   const base = [DOCKER, "run", "--rm", ...mounts, KICAD, "kicad-cli", "pcb"];
   const notes: string[] = [];
   const views: [string, string[]][] = [

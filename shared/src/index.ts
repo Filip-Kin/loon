@@ -1,3 +1,4 @@
+export * from "./kicad-version";
 export * from "./sexpr";
 export * from "./schematic";
 export * from "./geometry";
@@ -7,5 +8,7 @@ export * from "./apply-ops";
 export * from "./modules";
 export * from "./probe";
 export * from "./blocks";
+export * from "./segments";
+export * from "./compact";
 export * from "./kicad-sch";
 export * from "./contract";

@@ -46,4 +46,13 @@ MECHANICAL AND AESTHETIC (they are the same thing here):
     same orientation, same pitch, same internal arrangement.
 12. Two text orientations at most, readable left-to-right or bottom-to-top.
 13. The board outline fits the content. Empty board area is money: OSH Park
-    charges by the square inch.`;
+    charges by the square inch.
+
+THE SHEET, which is read by a person and has the same rules for the same reason:
+14. A sub-circuit is a block: its parts sit 10-20mm apart, close enough to read
+    as one thing.
+15. Blocks sit 40mm apart while they are being written, then the sheet is packed
+    with compact_sheet. A sheet that has to be scrolled across is a sheet nobody
+    checks; the radio kiosk came out 918mm wide and was unreadable.
+16. Anything further apart than a couple of blocks is joined by a label, not a
+    wire drawn across the sheet.`;

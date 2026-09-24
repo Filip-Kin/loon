@@ -3,6 +3,8 @@
 // serialization stays faithful, but it is shaped for a live editor and for the
 // AI to reason about (stable ids, flat lists, plain numbers).
 
+import { KICAD_SCH_VERSION } from "./kicad-version";
+
 export type Point = { x: number; y: number };
 
 // Graphic primitives that make up a symbol's body, parsed from a KiCad
@@ -125,7 +127,7 @@ export interface Schematic {
 
 export function emptySchematic(uuid: string): Schematic {
   return {
-    version: 20231120,
+    version: KICAD_SCH_VERSION,
     generator: "loon",
     uuid,
     paper: "A4",

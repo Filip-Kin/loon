@@ -45,6 +45,11 @@ export type Op =
   // Draw the wiring between blocks. Nets that cannot be routed without crossing
   // a pin stay joined by name.
   | { op: "autowire"; maxSpan?: number; includeRails?: boolean }
+  // Pull the sheet in. Sub-circuits keep their own layout and are re-packed
+  // with a fixed gutter, so a generated sheet reads at one zoom instead of
+  // nine. Wires that spanned two sub-circuits are dropped; follow with
+  // autowire to draw them again.
+  | { op: "compact_sheet"; gutter?: number; joinGap?: number; targetWidth?: number }
   // Re-expand a block with new parameters. Its old parts are removed first, so
   // hand edits inside the block are lost - the UI must confirm.
   | { op: "set_block_params"; blockId: string; params: Record<string, string | number> };

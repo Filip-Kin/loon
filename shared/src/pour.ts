@@ -9,6 +9,7 @@
 
 import type { Board, Zone } from "./board";
 import type { Netlist } from "./netlist";
+import { localWorld } from "./pcbgen";
 
 export interface PourOptions {
   // A pour can be bounded: ground belongs everywhere on the back of the board,

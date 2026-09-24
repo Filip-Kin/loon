@@ -29,7 +29,10 @@ const libRaw = library.rawMap(Array.from(new Set(schem.symbols.map((s) => s.libI
 const text = serializeSchematic(schem, libRaw);
 
 const { schem: rt } = parseSchematic(text);
-console.log("roundtrip symbols:", rt.symbols.length, "wires:", rt.wires.length, "libSymbols:", Object.keys(rt.libSymbols).length);
+// A loon wire is a polyline; a KiCad wire is two points. A bend therefore comes
+// back as two wires, so the round trip is measured in segments, not wires.
+const segments = (ws: { pts: unknown[] }[]) => ws.reduce((n, w) => n + w.pts.length - 1, 0);
+console.log("roundtrip symbols:", rt.symbols.length, "wires:", rt.wires.length, `(${segments(rt.wires)} segments from ${segments(schem.wires)})`, "libSymbols:", Object.keys(rt.libSymbols).length);
 
 // Module expansion test.
 const s2 = emptySchematic(crypto.randomUUID());
@@ -38,7 +41,7 @@ const rVal = s2.symbols.find((s) => s.libId === "Device:R")?.properties.Value;
 console.log("\nmodule led_indicator ->", s2.symbols.map((s) => `${s.properties.Reference}=${s.libId.split(":")[1]}`).join(", "), "| R value:", rVal, "| wires:", s2.wires.length);
 const modOk = mr.results.every((r) => r.ok) && s2.symbols.length === 4 && s2.wires.length === 3;
 
-const ok = modOk && rt.symbols.length === schem.symbols.length && rt.wires.length === schem.wires.length && results.every((r) => r.ok);
+const ok = modOk && rt.symbols.length === schem.symbols.length && segments(rt.wires) === segments(schem.wires) && results.every((r) => r.ok);
 console.log(ok ? "\nSELFTEST PASS" : "\nSELFTEST FAIL");
 console.log("\n--- .kicad_sch head ---\n" + text.split("\n").slice(0, 40).join("\n"));
 if (!ok) process.exit(1);

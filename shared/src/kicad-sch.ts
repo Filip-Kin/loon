@@ -20,6 +20,7 @@ import {
   type Sx,
   type SxList,
 } from "./sexpr";
+import { KICAD_SCH_VERSION } from "./kicad-version";
 import type {
   Schematic,
   LibSymbol,
@@ -240,13 +241,23 @@ export function emitLibSymbol(def: LibSymbol): SxList {
   return root;
 }
 
+// A KiCad uuid is 8-4-4-4-12 hex. Overwriting four characters of the last group
+// with the segment index keeps the shape and stays the same on every save.
+function segmentUuid(base: string, index: number): string {
+  const tail = (index & 0xffff).toString(16).padStart(4, "0");
+  return base.slice(0, 24) + tail + base.slice(28);
+}
+
 // #region schematic serialization
 export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxList>): string {
   const root: SxList = list(sym("kicad_sch"));
   const push = (n: Sx) => root.items.push(n);
 
-  push(node("version", num(schem.version)));
+  // Always the format loon writes today, not whatever the file was loaded at.
+  // A file stamped with an older version opens with an upgrade prompt.
+  push(node("version", num(KICAD_SCH_VERSION)));
   push(node("generator", str(schem.generator)));
+  push(node("generator_version", str("10.0")));
   push(node("uuid", str(schem.uuid)));
   push(node("paper", str(schem.paper)));
 
@@ -297,9 +308,20 @@ export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxLi
   }
 
   // wires
+  // A KiCad (wire ...) holds exactly two points. loon's model keeps a wire as a
+  // polyline because a run from a pin to a label bends, so each bend becomes its
+  // own segment here. Emitting the polyline whole makes KiCad refuse the entire
+  // sheet with "Failed to load schematic" and no line number.
   for (const w of schem.wires) {
-    const ptsNode = list(sym("pts"), ...w.pts.map((p) => node("xy", num(p.x), num(p.y))));
-    push(node("wire", ptsNode, node("stroke", node("width", num(0)), node("type", sym("default"))), node("uuid", str(w.uuid))));
+    for (let i = 0; i + 1 < w.pts.length; i++) {
+      const a = w.pts[i], b = w.pts[i + 1];
+      if (a.x === b.x && a.y === b.y) continue;
+      const ptsNode = list(sym("pts"), node("xy", num(a.x), num(a.y)), node("xy", num(b.x), num(b.y)));
+      // Segment 0 keeps the wire's own id so a round trip through KiCad and back
+      // still matches. Later segments derive one from it, stable across saves.
+      const uuid = i === 0 ? w.uuid : segmentUuid(w.uuid, i);
+      push(node("wire", ptsNode, node("stroke", node("width", num(0)), node("type", sym("default"))), node("uuid", str(uuid))));
+    }
   }
 
   // junctions
@@ -413,7 +435,7 @@ export function parseSchematic(text: string): { schem: Schematic; libRaw: Record
 
   const tb = find(root, "title_block");
   const schem: Schematic = {
-    version: parseInt(value(root, "version") ?? "20231120", 10),
+    version: parseInt(value(root, "version") ?? String(KICAD_SCH_VERSION), 10),
     generator: value(root, "generator") ?? "loon",
     uuid: value(root, "uuid") ?? crypto.randomUUID(),
     paper: value(root, "paper") ?? "A4",

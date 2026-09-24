@@ -8,6 +8,7 @@
 // an intermediate step on the way to Gerbers.
 
 import type { Point } from "./schematic";
+import { KICAD_PCB_VERSION } from "./kicad-version";
 
 export type BoardSide = "F" | "B";
 
@@ -88,6 +89,8 @@ export const OSHPARK_4LAYER: DesignRules = {
 // Silkscreen text: what the board says about itself. A connector you cannot
 // identify without the schematic is a connector someone will wire backwards.
 export interface BoardText {
+  // Stable across saves, so the file does not churn and the editor has a key.
+  uuid?: string;
   at: Point;
   text: string;
   layer: string; // "F.SilkS" / "B.SilkS"
@@ -112,7 +115,7 @@ export interface Board {
 
 export function emptyBoard(rules: DesignRules = OSHPARK_2LAYER): Board {
   return {
-    version: 20241229, // KiCad 9 board format, matching the pinned footprint library
+    version: KICAD_PCB_VERSION,
 
     generator: "loon",
     rules,

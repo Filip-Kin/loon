@@ -3,7 +3,7 @@ import { layCopper } from "../services/copper";
 import { router, publicProcedure } from "../trpc";
 import { library } from "../services/library";
 import { storage } from "../services/storage";
-import { generateOps, generateFirmware } from "../services/ai";
+import { generateOps } from "../services/ai";
 import { probeHub } from "../services/probe-hub";
 import { parseSchematic, serializeSchematic } from "@loon/shared/kicad-sch";
 import { buildNetlist } from "@loon/shared/netlist";
@@ -12,7 +12,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
-import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress } from "../services/route-render";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress, boardDiskState, syncFromKicad } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -106,6 +106,22 @@ async function projectState(project: string, schem: Schematic, unit = ""): Promi
   }
   void schem;
   return lines.join("\n");
+}
+
+// Firmware already in the project, for the assistant's context. Capped, because
+// a whole PlatformIO tree is not worth a prompt.
+async function firmwareFiles(project: string, unit = ""): Promise<{ path: string; content: string }[]> {
+  try {
+    const files = await storage.listFiles(project, "firmware", unit);
+    return await Promise.all(
+      files
+        .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
+        .slice(0, 20)
+        .map(async (f) => ({ path: f.path, content: await storage.readFile(project, `firmware/${f.path}`, unit) })),
+    );
+  } catch {
+    return [];
+  }
 }
 
 async function footprintsFor(schem: Schematic): Promise<Record<string, any>> {
@@ -356,9 +372,11 @@ const aiRouter = router({
           job.steps!.push({ label, ok, detail });
         };
         try {
-          job.message = "Thinking about the whole board...";
+          job.message = "Thinking about the whole board…";
           const state = await projectState(project, schem, unit);
-          const ai = await generateOps(input.message, schem, state);
+          // The one assistant writes firmware too, so it gets the files that
+          // are already there along with the schematic.
+          const ai = await generateOps(input.message, schem, state, await firmwareFiles(project, unit));
 
           // A board named in the reply wins over the one on screen, and a board
           // created in this same reply has to exist before its ops land.
@@ -535,43 +553,6 @@ const firmwareRouter = router({
       return { state: job.state, log: job.log.slice(-20000), error: job.error, artifacts: job.artifacts, elapsedMs: Date.now() - job.started };
     }),
 
-  // The assistant writes firmware as a job too: it takes as long as a design
-  // edit, and writes whole files rather than ops.
-  aiStart: publicProcedure
-    .input(z.object({ project: z.string(), message: z.string(), schem: z.any(), board: z.string().optional() }))
-    .mutation(({ input }) => {
-      reapJobs();
-      const id = crypto.randomUUID();
-      const job: AiJob = { id, started: Date.now(), state: "running" };
-      aiJobs.set(id, job);
-      (async () => {
-        try {
-          const unit = input.board ?? "";
-          const files = await storage.listFiles(input.project, "firmware", unit);
-          const existing = await Promise.all(
-            files
-              .filter((f) => /\.(c|cpp|h|hpp|ini|py|txt|json|md)$/.test(f.path))
-              .slice(0, 20)
-              .map(async (f) => ({ path: f.path, content: await storage.readFile(input.project, `firmware/${f.path}`, unit) })),
-          );
-          const res = await generateFirmware(input.message, input.schem as Schematic, existing);
-          const written: string[] = [];
-          for (const f of res.files) {
-            if (f.path.includes("board_pins.h")) continue; // generated, never authored
-            await storage.writeFile(input.project, `firmware/${f.path}`, f.content, unit);
-            written.push(f.path);
-          }
-          job.message = `${res.message}${written.length ? ` (wrote ${written.join(", ")})` : ""}`;
-          job.ops = written as unknown[];
-          job.state = "done";
-        } catch (e: any) {
-          job.error = String(e?.message ?? e);
-          job.state = "error";
-        }
-      })();
-      return { id };
-    }),
-
   builds: publicProcedure
     .input(z.object({ project: z.string(), board: z.string().optional() }))
     .query(({ input }) => listBuilds(input.project).map((b) => ({ id: b.id, state: b.state, started: b.started }))),
@@ -704,6 +685,22 @@ const pcbRouter = router({
       const report = await routeWithFreerouting(input.project, unit, { passes: input.passes ?? 30, keepTracks: input.keepTracks, dirtyRefs: input.dirtyRefs });
       const routed = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       return { report, board: routed };
+    }),
+
+  // When board.kicad_pcb and loon's own model of it were last written. The
+  // editor polls this so a save from the user's own KiCad shows up here.
+  diskState: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .query(({ input }) => boardDiskState(input.project, input.board ?? "")),
+
+  // Pull board.kicad_pcb back in: copper, placement and silkscreen.
+  syncFromDisk: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const unit = input.board ?? "";
+      const note = await syncFromKicad(input.project, unit);
+      const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
+      return { board, note };
     }),
 
   // Where the current (or last) route run is; polled by the editor's bar.
