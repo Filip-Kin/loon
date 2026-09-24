@@ -430,7 +430,7 @@ async function runDrcJson(project: string, unit: string): Promise<{ violations: 
 // shows the board as it is on disk. Copper after a route, and placement and
 // silkscreen after the user has had the board open in KiCad themselves - loon
 // does not own the file while it is in someone else's editor.
-export async function syncFromKicad(project: string, unit = ""): Promise<{ tracks: number; vias: number; filled: number; moved: number; texts: number }> {
+export async function syncFromKicad(project: string, unit = ""): Promise<{ tracks: number; vias: number; filled: number; moved: number; added: number; dropped: number; texts: number }> {
   const text = await storage.readFile(project, "board.kicad_pcb", unit);
   const root = parse(text);
   const netNames = new Map<number, string>();
@@ -463,11 +463,16 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   let moved = 0;
   const placed = new Map<string, { at: Point; rotation: number; side: "F" | "B" }>();
   const padNetsByRef = new Map<string, Record<string, string>>();
+  const libAndValue = new Map<string, { libId: string; value: string }>();
   for (const f of findAll(root, "footprint")) {
-    let ref = "";
+    let ref = "", val = "";
     for (const pr of findAll(f, "property")) {
-      if (pr.items[1]?.kind === "atom" && pr.items[1].value === "Reference" && pr.items[2]?.kind === "atom") ref = pr.items[2].value;
+      if (pr.items[1]?.kind === "atom" && pr.items[2]?.kind === "atom") {
+        if (pr.items[1].value === "Reference") ref = pr.items[2].value;
+        if (pr.items[1].value === "Value") val = pr.items[2].value;
+      }
     }
+    if (ref) libAndValue.set(ref, { libId: f.items[1]?.kind === "atom" ? f.items[1].value : "", value: val });
     if (!ref) for (const t of findAll(f, "fp_text")) {
       if (t.items[1]?.kind === "atom" && t.items[1].value === "reference" && t.items[2]?.kind === "atom") ref = t.items[2].value;
     }
@@ -487,6 +492,23 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
       rotation: (((at && at.items.length > 3 ? num(at, 3) : 0) % 360) + 360) % 360,
       side: layer.startsWith("B.") ? "B" : "F",
     });
+  }
+  // Parts KiCad has and loon does not (added there after "Update PCB from
+  // schematic") join the model; parts KiCad no longer has leave it. Mounting
+  // holes and the like carry no nets in either, so they are matched the same way.
+  let added = 0, dropped = 0;
+  const known = new Set(board.footprints.map((f) => f.ref));
+  for (const [ref, p] of placed) {
+    if (known.has(ref)) continue;
+    const lv = libAndValue.get(ref);
+    if (!lv?.libId) continue;
+    board.footprints.push({ uuid: crypto.randomUUID(), ref, value: lv.value, libId: lv.libId, at: p.at, rotation: p.rotation, side: p.side, padNets: padNetsByRef.get(ref) ?? {} });
+    added++;
+  }
+  if (placed.size >= board.footprints.length * 0.9) {
+    const before = board.footprints.length;
+    board.footprints = board.footprints.filter((f) => placed.has(f.ref));
+    dropped = before - board.footprints.length;
   }
   for (const f of board.footprints) {
     const p = placed.get(f.ref);
@@ -527,7 +549,7 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (hit) { z.filled = hit.polys; filled++; }
   }
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2), unit);
-  return { tracks: tracks.length, vias: vias.length, filled, moved, texts: texts.length };
+  return { tracks: tracks.length, vias: vias.length, filled, moved, added, dropped, texts: texts.length };
 }
 
 // #region disk watch
