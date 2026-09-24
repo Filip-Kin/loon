@@ -938,7 +938,7 @@ export function buildRadioKiosk(): Schematic {
   c("C23", "4.7u/100V", px + 100, py - 30, "BOOST_OUT", "GND", FP.c1210);
   c("C24", "4.7u/100V", px + 108, py - 30, "BOOST_OUT", "GND", FP.c1210);
   c("C26", "4.7u/100V", px + 116, py - 30, "BOOST_OUT", "GND", FP.c1210);
-  part("C25", "Device:C_Polarized", "47u/100V", px + 126, py - 30, FP.cElec8);
+  part("C25", "Device:C_Polarized", "47u/100V", px + 126, py - 30, FP.cElec10); // 100 V parts are D10
   label("C25", "1", "BOOST_OUT");
   label("C25", "2", "GND");
   // Port switch: P-FET from the boost output to the port, off by default (R27
@@ -1253,15 +1253,15 @@ export function buildRadioKiosk(): Schematic {
     Q11: "C20917", // AO3400A
     Q13: "C192576", // AO4482
     U3: "C841384", U5: "C841384", // LMR33630ADDAR
-    U4: "C130103", // LM3150MHX/NOPB
+    U4: "C48112", // LM3150MHX/NOPB
     U12: "C2941042", // LM74700QDBVRQ1
-    Q40: "C88370", Q41: "C88370", // AOD4184A
+    Q40: "C99124", Q41: "C99124", // AOD4184A
     L3: "C2847554", // MDA1040-150M
     L4: "C2847553", // MDA1040-100M
     L5: "C2687402", // SRP7028A-100M
-    Q23: "C110374", // DMP10H400SE
-    Q24: "C8523", // BSS123
-    D23: "C8100", // BZT52C12
+    Q23: "C156277", // DMP10H400SE-13
+    Q24: "C78755", // BSS123LT1G
+    D23: "C12747", // LBZT52C12T1G
     U31: "C7484", // SN74AHCT1G125DBVR
     C4: "C970680", // 47u/63V D8x10
     C26: "C337978", // 4.7u/100V 1210
@@ -1273,13 +1273,13 @@ export function buildRadioKiosk(): Schematic {
     Q9: "C8545", // 2N7002 (basic)
     Q20: "C192576", // AO4482
     L20: "C2847586", // MDA1365-330M
-    D1: "C118189", D2: "C148227", // SMAJ22A, SMAJ28A
+    D1: "C148220", D2: "C148227", // SMAJ22A, SMAJ28A
     D20: "C15874", // SS310
     D21: "C2099", // 1N4148W
     D22: "C10762", // SMAJ58A
     F1: "C2838912", // 1206TD-2A
     C97: "C346948", C98: "C346948", // 470u/25V D10x10
-    C25: "C46224", // 47u/100V D8x10
+    C25: "C970681", // 47u/100V D10x10
     C30: "C53084452", C40: "C53084452", C50: "C53084452", // 10u/50V 1210
     C34: "C53084530", C35: "C53084530", C36: "C53084530", C37: "C53084530", // 22u/25V 1210
     C54: "C53084530", C55: "C53084530", C56: "C53084530", C57: "C53084530",
@@ -1305,7 +1305,7 @@ export function buildRadioKiosk(): Schematic {
     U40: "C2969805", // STM32F072CBT6 (genuine: JLC stock 0, consign from DigiKey; APM32/FCM32 clones in stock are not it)
     U41: "C122228", // INA180A1IDBVR
     U42: "C122228", // INA180A1IDBVR
-    U43: "C7377", // MCP6001T-I/OT
+    U43: "C116490", // MCP6001T-I/OT
     D40: "C2099", // 1N4148W
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
