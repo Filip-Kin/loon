@@ -521,6 +521,26 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (pn && Object.keys(pn).length) f.padNets = pn;
   }
 
+  // Board outline from Edge.Cuts lines: KiCad may have resized the board.
+  const edge: Point[] = [];
+  for (const l of findAll(root, "gr_line")) {
+    if (value(l, "layer") !== "Edge.Cuts") continue;
+    const st = find(l, "start"), en = find(l, "end");
+    edge.push({ x: num(st, 1), y: num(st, 2) }, { x: num(en, 1), y: num(en, 2) });
+  }
+  for (const r of findAll(root, "gr_rect")) {
+    if (value(r, "layer") !== "Edge.Cuts") continue;
+    const st = find(r, "start"), en = find(r, "end");
+    edge.push({ x: num(st, 1), y: num(st, 2) }, { x: num(en, 1), y: num(en, 2) });
+  }
+  if (edge.length >= 4) {
+    const xs = edge.map((p) => p.x), ys = edge.map((p) => p.y);
+    const [l, r, t, b] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    board.outline = [{ x: l, y: t }, { x: r, y: t }, { x: r, y: b }, { x: l, y: b }];
+    if ((board as any).width !== undefined) (board as any).width = r - l;
+    if ((board as any).height !== undefined) (board as any).height = b - t;
+  }
+
   // Free silkscreen, which is the one thing on the board with no source in the
   // schematic, so KiCad's copy is the only copy.
   const texts: BoardText[] = [];
