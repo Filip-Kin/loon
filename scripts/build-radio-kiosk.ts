@@ -53,6 +53,9 @@ const FP = {
   srp7028: "Inductor_SMD:L_Bourns_SRP7028A_7.3x6.6mm",
   lfpak33: "Package_TO_SOT_SMD:LFPAK33",
   cElec8: "Capacitor_SMD:CP_Elec_8x10.5",
+  htssop14: "LCSC:HTSSOP-14_L5.0-W4.4-P0.65-LS6.4-BL-EP",
+  sot223: "LCSC:SOT-223_L6.5-W3.5-P2.30-LS7.0-BR",
+  l11x10: "LCSC:IND-SMD_L10.0-W10.0-APS10A40M470",
   fuse1206: "Fuse:Fuse_1206_3216Metric",
   xh2: "LCSC:CONN-TH_XH-2A", // LCSC footprints imported with easyeda2kicad into data/footprints
   barrel: "LCSC:DC-IN-TH_PJ-002BH",
@@ -229,10 +232,64 @@ const NMOS_100V: IcSymbolSpec = {
   libId: "Transistor_FET:Power_NMOS_100V",
   refPrefix: "Q",
   value: "AO4482 N-MOSFET 100V",
-  description: "100 V N-channel power MOSFET, SOIC-8. The boost switch for the 54 V rail: 60 V is too close to a 54 V output plus ringing.",
+  description: "100 V N-channel power MOSFET, plain SOIC-8 (the AO4482 has no exposed pad). The boost switch for the 54 V rail and the passive-path return switch.",
   keywords: "mosfet n-channel power 100v",
-  footprint: FP.soic8ep,
-  pins: [...SOIC8_FET_PINS, { number: "9", name: "D", type: "passive", side: "right" }],
+  footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+  pins: SOIC8_FET_PINS,
+};
+const NMOS_40V_D: IcSymbolSpec = {
+  libId: "Transistor_FET:Power_NMOS_40V_DPAK",
+  refPrefix: "Q",
+  value: "AOD4184A N-MOSFET 40V",
+  description: "40 V 50 A N-channel MOSFET, TO-252, 9.5 mR at 4.5 V gate. The laptop buck's switches, driven from the LM3150's 5.95 V drivers.",
+  keywords: "mosfet n-channel power 40v dpak",
+  footprint: FP.to252,
+  pins: [
+    { number: "1", name: "G", type: "input", side: "left" },
+    { number: "2", name: "D", type: "passive", side: "right" },
+    { number: "3", name: "S", type: "passive", side: "right" },
+  ],
+};
+const PMOS_100V: IcSymbolSpec = {
+  libId: "Transistor_FET:Power_PMOS_100V_SOT223",
+  refPrefix: "Q",
+  value: "DMP10H400SE P-MOSFET 100V",
+  description: "100 V P-channel MOSFET, SOT-223, 0.4 R. The port switch between the 54 V boost and the radio jack: the boost only reaches the port after a valid 802.3 detection.",
+  keywords: "mosfet p-channel 100v sot-223",
+  footprint: FP.sot223,
+  pins: [
+    { number: "1", name: "G", type: "input", side: "left" },
+    { number: "2", name: "D", type: "passive", side: "right" },
+    { number: "3", name: "S", type: "passive", side: "right" },
+    { number: "4", name: "D", type: "passive", side: "right" },
+  ],
+};
+// LM3150: synchronous buck controller for the laptop rail (4.5 A). Pin table
+// from SNVS561G. The exposed pad is SGND.
+const LM3150: IcSymbolSpec = {
+  libId: "Regulator_Controller:LM3150",
+  refPrefix: "U",
+  value: "LM3150 buck controller",
+  description: "Wide-VIN synchronous buck controller, HTSSOP-14, constant on-time with emulated ripple. External N-FETs, RDS(on) current sensing on the low side.",
+  keywords: "buck controller synchronous constant on-time",
+  footprint: FP.htssop14,
+  pins: [
+    { number: "1", name: "VCC", type: "power_out", side: "right" },
+    { number: "2", name: "VIN", type: "power_in", side: "left" },
+    { number: "3", name: "EN", type: "input", side: "left" },
+    { number: "4", name: "FB", type: "input", side: "left" },
+    { number: "5", name: "SGND", type: "power_in", side: "left" },
+    { number: "6", name: "SS", type: "passive", side: "left" },
+    { number: "7", name: "RON", type: "passive", side: "left" },
+    { number: "8", name: "ILIM", type: "passive", side: "right" },
+    { number: "9", name: "SGND", type: "power_in", side: "left" },
+    { number: "10", name: "SW", type: "passive", side: "right" },
+    { number: "11", name: "HG", type: "output", side: "right" },
+    { number: "12", name: "BST", type: "passive", side: "right" },
+    { number: "13", name: "LG", type: "output", side: "right" },
+    { number: "14", name: "PGND", type: "power_in", side: "right" },
+    { number: "15", name: "EP", type: "power_in", side: "left" },
+  ],
 };
 const NMOS_60V: IcSymbolSpec = {
   libId: "Transistor_FET:Power_NMOS_60V_SO8",
@@ -357,6 +414,23 @@ const INA180: IcSymbolSpec = {
 
 const INA180A2: IcSymbolSpec = { ...INA180, libId: "Amplifier_Current:INA180A2", value: "INA180A2IDBVR", description: "High-side current-sense amplifier, gain 50, SOT-23-5 (pinout A). Laptop rail current for the constant-current loop: 1 V per amp with a 20 mR shunt." };
 
+// MCP6001: rail-to-rail op-amp, SOT-23-5 (1 OUT, 2 VSS, 3 IN+, 4 IN-, 5 VDD).
+// Replaces the LMV321 clone in the CC loop, whose inputs stop 1.5 V below its rail.
+const MCP6001: IcSymbolSpec = {
+  libId: "Amplifier_Operational:MCP6001-OT",
+  refPrefix: "U",
+  value: "MCP6001T-I/OT",
+  description: "1 MHz rail-to-rail in/out op-amp, SOT-23-5. The laptop rail's constant-current integrator.",
+  keywords: "op-amp rail-to-rail",
+  footprint: FP.sot23_5,
+  pins: [
+    { number: "1", name: "OUT", type: "output", side: "right" },
+    { number: "2", name: "VSS", type: "power_in", side: "left" },
+    { number: "3", name: "IN+", type: "input", side: "left" },
+    { number: "4", name: "IN-", type: "input", side: "left" },
+    { number: "5", name: "VDD", type: "power_in", side: "right" },
+  ],
+};
 const LMV321: IcSymbolSpec = {
   libId: "Amplifier_Operational:LMV321",
   refPrefix: "U",
@@ -511,7 +585,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, NMOS_60V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, LM3150, MCP6001, NMOS_40V_D, PMOS_100V, TLV7011, PMOS_40V, NMOS_60V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -530,14 +604,14 @@ export function buildRadioKiosk(): Schematic {
 
   // An LM74700 ideal diode: the controller, its N-FET and the charge-pump cap.
   // EN is tied to ANODE (always on). Current flows ANODE -> CATHODE only.
-  const idealDiode = (n: number, inNet: string, outNet: string, x: number, y: number) => {
+  const idealDiode = (n: number, inNet: string, outNet: string, x: number, y: number, enNet?: string) => {
     const u = `U${n}`, q = `Q${n}`, cc = `C${n}`;
     part(u, LM74700.libId, "LM74700-Q1", x, y);
     part(q, NMOS_60V.libId, "SI4470EY", x + 30, y - 10);
     c(cc, "100n", x + 30, y + 14, `${u}_VCAP`, inNet);
     label(u, "1", `${u}_VCAP`);
     label(u, "2", "GND");
-    label(u, "3", inNet);
+    label(u, "3", enNet ?? inNet); // EN: on with the input, or under firmware control
     label(u, "4", outNet);
     label(u, "5", `${u}_GATE`);
     label(u, "6", inNet);
@@ -550,7 +624,7 @@ export function buildRadioKiosk(): Schematic {
   // 12 V and 5 V; the 15.6 V row is derived (RFBB = 100k / (Vout - 1)).
   // One 10 uH XAL7030 for all three: the 12 V row asks for 15 uH, which only
   // buys lower ripple at loads this board never reaches.
-  const buck = (n: number, vout: number, rfbb: string, coutV: string, vinNet: string, voutNet: string, x: number, y: number, enNet?: string) => {
+  const buck = (n: number, vout: number, rfbb: string, coutV: string, vinNet: string, voutNet: string, x: number, y: number, enNet?: string, ind: [string, string] = ["SRP7028A-100M 10u 3.5A", FP.srp7028]) => {
     const u = `U${n}`;
     const L = (s: string) => `${u}_${s}`;
     part(u, LMR33630.libId, `LMR33630 ${vout}V`, x, y);
@@ -558,7 +632,7 @@ export function buildRadioKiosk(): Schematic {
     c(`C${n}1`, "220n/50V", x - 26, y - 6, vinNet, "GND");
     c(`C${n}2`, "1u", x + 34, y + 14, L("VCC"), "GND");
     c(`C${n}3`, "100n", x + 26, y - 20, L("BOOT"), L("SW"));
-    part(`L${n}`, "Device:L", "SRP7028A-100M 10u 5A", x + 40, y - 12, FP.srp7028);
+    part(`L${n}`, "Device:L", ind[0], x + 40, y - 12, ind[1]);
     label(`L${n}`, "1", L("SW"));
     label(`L${n}`, "2", voutNet);
     for (let i = 0; i < 4; i++) c(`C${n}${4 + i}`, `22u/${coutV}`, x + 56 + i * 8, y + 2, voutNet, "GND", FP.c1210);
@@ -613,7 +687,7 @@ export function buildRadioKiosk(): Schematic {
   label("J2", "1", "VIN_DC");
   label("J2", "2", "GND");
   nc("J2", "3");
-  part("D1", "Device:D", "SMAJ28A TVS", 60, 40, FP.sma);
+  part("D1", "Device:D", "SMAJ22A TVS", 60, 40, FP.sma);
   label("D1", "1", "VIN_USB");
   label("D1", "2", "GND");
   part("D2", "Device:D", "SMAJ28A TVS", 60, 90, FP.sma);
@@ -633,8 +707,23 @@ export function buildRadioKiosk(): Schematic {
   // Which input is live: a divider on the DC jack side, same ratio as VIN_SENSE.
   r("R94", "100k", 80, 110, "VIN_DC", "DCIN_SENSE");
   r("R95", "14.0k", 80, 122, "DCIN_SENSE", "GND");
-  idealDiode(1, "VIN_USBS", "VIN", 100, 40);
+  // The USB path can be switched off by firmware (USB_DIS high) once the DC
+  // jack is live; the pull-up to the input keeps it on until then.
+  idealDiode(1, "VIN_USBS", "VIN", 100, 40, "USB_EN");
+  r("R5", "100k", 100, 20, "VIN_USBS", "USB_EN");
+  part("Q25", "Device:Q_NMOS_GSD", "2N7002", 122, 20, FP.sot23);
+  label("Q25", "3", "USB_EN");
+  label("Q25", "2", "GND");
+  label("Q25", "1", "USB_DIS");
+  r("R6", "100k", 134, 20, "USB_DIS", "GND");
   idealDiode(2, "VIN_DC", "VIN", 100, 90);
+  // The DC jack hot-plugs a 24 V brick into an all-ceramic VIN: an electrolytic
+  // damps the ringing (LMR33630 abs max 38 V), and the ideal diode wants at
+  // least 22 nF on its anode.
+  c("C3", "100n/50V", 100, 110, "VIN_DC", "GND");
+  part("C4", "Device:C_Polarized", "47u/63V", 130, 110, FP.cElec8);
+  label("C4", "1", "VIN");
+  label("C4", "2", "GND");
   c("C90", "22u/50V", 180, 60, "VIN", "GND", FP.c1210);
   c("C91", "22u/50V", 188, 60, "VIN", "GND", FP.c1210);
   // Vin sense: 100k / 14.0k puts 13.4 V at 1.65 V, the comparator's reference.
@@ -644,35 +733,87 @@ export function buildRadioKiosk(): Schematic {
   r("R91", "14.0k", 210, 62, "VIN_SENSE", "GND");
 
   // #region rails
-  buck(3, 12, "9.09k", "25V", "VIN", "+12V_BUCK", 80, 170);
+  // 15 uH: the datasheet minimum for 12 V at 400 kHz is 8.4 uH and a 10 uH part
+  // at -20 % sits below it (SNVSAN3F Eq. 5, Table 9-2).
+  buck(3, 12, "9.09k", "25V", "VIN", "+12V_BUCK", 80, 170, undefined, ["MDA1040-150M 15u 6A", FP.l11x10]);
   idealDiode(6, "+12V_BUCK", "+12V", 230, 170); // blocks the pack from pushing into a dead buck
-  buck(4, 15.6, "6.81k", "25V", "VIN", "+15V6_BUCK", 80, 260, "LAPTOP_EN");
+  // Laptop rail: 15.75 V at 4.5 A (the Toughbook brick is 16 V 4.5 A). An
+  // LMR33630 stops at 3 A, so this is an LM3150 controller with two AOD4184A
+  // switches, 300 kHz constant on-time. Values from SNVS561G section 9.2.2:
+  // RON = VOUT / (100 pC x fs) = 523k; FB = 0.6 V x (1 + 126k / 4.99k);
+  // RLIM = ICL x RDS(on)hot / 85 uA = 4.8 A x 12 mR / 85 uA = 681R (low-side
+  // RDS(on) sensing, valley limit ~4.8 A); SS 68 nF = 5 ms; BST 0.47 uF; VCC
+  // 4.7 uF. Ripple at 20 V in: (20 - 15.75) x 2.6 us / 10 uH = 1.1 A.
+  part("U4", LM3150.libId, "LM3150 15.75V 4.5A", 80, 260);
+  label("U4", "2", "VIN");
+  label("U4", "3", "U4_EN");
+  label("U4", "4", "U4_FB");
+  for (const n of ["5", "9", "15"]) label("U4", n, "GND");
+  label("U4", "6", "U4_SS");
+  label("U4", "7", "U4_RON");
+  label("U4", "8", "U4_ILIM");
+  label("U4", "10", "U4_SW");
+  label("U4", "11", "U4_HG");
+  label("U4", "12", "U4_BST");
+  label("U4", "13", "U4_LG");
+  label("U4", "14", "GND");
+  label("U4", "1", "U4_VCC");
+  c("C40", "10u/50V", 46, 254, "VIN", "GND", FP.c1210);
+  c("C44", "10u/50V", 54, 254, "VIN", "GND", FP.c1210);
+  c("C41", "220n/50V", 62, 254, "VIN", "GND");
+  c("C42", "4.7u/16V", 114, 274, "U4_VCC", "GND");
+  c("C43", "470n/16V", 106, 240, "U4_BST", "U4_SW");
+  c("C48", "68n", 46, 274, "U4_SS", "GND");
+  c("C49", "220p C0G", 128, 290, "+15V6_BUCK", "U4_FB");
+  r("R44", "523k 1%", 46, 290, "VIN", "U4_RON");
+  r("R45", "681R 1%", 114, 254, "U4_ILIM", "U4_SW");
+  r("R41", "126k 1%", 128, 302, "+15V6_BUCK", "U4_FB");
+  r("R40", "4.99k 1%", 128, 314, "U4_FB", "GND");
+  // EN through 10k: +3V3 can outlast VIN for a moment and EN must stay under VIN + 0.3 V
+  r("R46", "10k", 66, 290, "LAPTOP_EN", "U4_EN");
+  part("Q40", NMOS_40V_D.libId, "AOD4184A", 120, 236);
+  label("Q40", "2", "VIN");
+  label("Q40", "1", "U4_HG");
+  label("Q40", "3", "U4_SW");
+  part("Q41", NMOS_40V_D.libId, "AOD4184A", 120, 262);
+  label("Q41", "2", "U4_SW");
+  label("Q41", "1", "U4_LG");
+  label("Q41", "3", "GND");
+  part("L4", "Device:L", "MDA1040-100M 10u 8A", 140, 240, FP.l11x10);
+  label("L4", "1", "U4_SW");
+  label("L4", "2", "+15V6_BUCK");
+  for (let i = 0; i < 3; i++) c(`C${45 + i}`, "22u/25V", 150 + i * 8, 254, "+15V6_BUCK", "GND", FP.c1210);
   // Laptop rail under firmware control, off at reset. On a shared USB-C port
   // the laptop's charge demand can exceed the allocation; firmware decides.
-  r("R92", "100k", 80, 300, "LAPTOP_EN", "GND");
+  r("R92", "100k", 80, 300, "U4_EN", "GND");
   // Constant-current limit on the laptop rail. R96 + U42 read the rail current
-  // (1 V/A). U43 integrates (sense - setpoint): above the setpoint its output
-  // rises and, through D40/R98, lifts the buck's FB node so the rail folds
-  // back. The setpoint LAPTOP_ILIM is a filtered PWM from the MCU, 1 V per amp,
-  // so firmware sets the laptop's share of a shared charger and the charger
-  // never sees an overload. Below the limit D40 is off and the buck is a
-  // normal 15.6 V source.
+  // (INA180A1, 0.4 V/A: 4.5 A = 1.8 V, inside the op-amp's range). U43 is a
+  // pure integrator of (sense - setpoint), both sides filtered with the same
+  // 0.47 ms time constant (R47/C119 and R97/C117): above the setpoint its
+  // output rises and, through D40/R98, lifts the buck's FB node so the rail
+  // folds back. The setpoint LAPTOP_ILIM is a filtered PWM from the MCU,
+  // 0.4 V per amp, so firmware sets the laptop's share of a shared charger and
+  // the charger never sees an overload. Below the limit D40 is off and the
+  // buck is a normal 15.75 V source.
   r("R96", "20m 1W", 170, 246, "+15V6_BUCK", "+15V6_S", FP.r2512);
-  part("U42", INA180A2.libId, "INA180A2", 170, 262);
+  part("U42", INA180.libId, "INA180A1", 170, 262);
   label("U42", "1", "LAPTOP_ISENSE");
   label("U42", "2", "GND");
   label("U42", "3", "+15V6_BUCK");
   label("U42", "4", "+15V6_S");
   label("U42", "5", "+3V3");
   c("C116", "100n", 186, 262, "+3V3", "GND");
-  part("U43", LMV321.libId, "LMV321", 170, 290);
-  label("U43", "1", "LAPTOP_ISENSE");
+  part("U43", MCP6001.libId, "MCP6001T-I/OT", 170, 290);
+  label("U43", "3", "LAPTOP_ISENSE_F");
   label("U43", "2", "GND");
-  label("U43", "3", "LAPTOP_ILIM_N");
-  label("U43", "4", "LAPTOP_CC");
+  label("U43", "4", "LAPTOP_ILIM_N");
+  label("U43", "1", "LAPTOP_CC");
   label("U43", "5", "+3V3");
+  c("C120", "100n", 186, 276, "+3V3", "GND");
+  r("R47", "10k", 150, 280, "LAPTOP_ISENSE", "LAPTOP_ISENSE_F");
+  c("C119", "47n", 150, 268, "LAPTOP_ISENSE_F", "GND");
   r("R97", "100k", 150, 290, "LAPTOP_ILIM", "LAPTOP_ILIM_N");
-  c("C117", "10n", 186, 300, "LAPTOP_CC", "LAPTOP_ILIM_N");
+  c("C117", "4.7n", 186, 300, "LAPTOP_CC", "LAPTOP_ILIM_N");
   part("D40", "Device:D", "1N4148W", 200, 290, "Diode_SMD:D_SOD-123");
   label("D40", "2", "LAPTOP_CC");
   label("D40", "1", "LAPTOP_CC_D");
@@ -680,11 +821,16 @@ export function buildRadioKiosk(): Schematic {
   r("R99", "10k", 130, 290, "LAPTOP_ILIM_PWM", "LAPTOP_ILIM");
   c("C118", "1u", 130, 304, "LAPTOP_ILIM", "GND");
   idealDiode(7, "+15V6_S", "LAPTOP_OUT", 230, 260); // a brick in the wrong jack cannot feed the board
+  // the LM74700 wants 22 nF on its anode and 0.1 uF on its cathode
+  c("C5", "100n/50V", 220, 290, "+15V6_S", "GND");
+  c("C8", "1u/50V", 280, 290, "LAPTOP_OUT", "GND", FP.c1206);
   part("J3", BARREL.libId, "Laptop out 15.6V, PJ-002BH 5.5x2.5 (v1 jack)", 300, 260);
   label("J3", "1", "LAPTOP_OUT");
   label("J3", "2", "GND");
   nc("J3", "3");
-  buck(5, 5, "24.9k", "25V", "VIN", "+5V", 80, 350);
+  // From +12V, not VIN: on battery the pack holds +12V, and the MCU and the
+  // comparator that keeps the pack switched in live on +3V3.
+  buck(5, 5, "24.9k", "25V", "+12V", "+5V", 80, 350);
   ops.push({ op: "instantiate_module", moduleId: "ldo_3v3", params: { vin_net: "+5V" }, at: { x: 230, y: 350 } });
   // Bulk on the backed-up rail: covers the microseconds between the input
   // dropping and the battery FET closing.
@@ -705,21 +851,25 @@ export function buildRadioKiosk(): Schematic {
   part("F1", "Device:Fuse", "2A", bx + 110, by, FP.fuse1206);
   label("F1", "1", "PACK_P");
   label("F1", "2", "PACK_F");
+  // An ideal diode (U12/Q12) sits between the pack and the switch: without it
+  // Q8's body diode, and its channel while on, would let the 12 V buck charge
+  // the primary cells. It also makes the self-test read the pack, not the rail.
+  idealDiode(12, "PACK_F", "BK_MID", bx + 110, by - 40);
   // High-side P-FET. Gate held at the pack by R80 (off); Q9 pulls it down (on)
-  // when the comparator says the input is gone. Body diode points pack -> rail.
+  // when the comparator says the input is gone.
   part("Q8", PMOS_40V.libId, "AOD4185", bx + 150, by - 10);
-  label("Q8", "3", "PACK_F");
+  label("Q8", "3", "BK_MID");
   label("Q8", "2", "+12V");
   label("Q8", "1", "BK_GATE");
-  r("R80", "100k", bx + 150, by + 14, "PACK_F", "BK_GATE");
+  r("R80", "100k", bx + 150, by + 14, "BK_MID", "BK_GATE");
   part("Q9", "Device:Q_NMOS_GSD", "2N7002", bx + 180, by + 14, FP.sot23);
   label("Q9", "3", "BK_GATE");
-  label("Q9", "2", "GND");
+  label("Q9", "2", "BK_ARM"); // through Q10: the pack switch only works while firmware arms it
   label("Q9", "1", "BK_DRV");
   r("R81", "1k", bx + 180, by + 34, "BK_ON", "BK_DRV");
   // Comparator: IN- watches the input, IN+ sits at 1.65 V from the 3.3 V rail.
   // OUT goes high (backup on) when VIN_SENSE falls below the reference, i.e.
-  // Vin < 16 V. R84 adds ~50 mV of hysteresis so it does not chatter at the edge.
+  // Vin < 13.4 V. R84 gives ~0.2 V of hysteresis at VIN so it does not chatter.
   part("U10", TLV7011.libId, "TLV7011", bx + 230, by);
   label("U10", "5", "+3V3");
   label("U10", "2", "GND");
@@ -730,25 +880,30 @@ export function buildRadioKiosk(): Schematic {
   r("R83", "10k", bx + 200, by - 8, "BK_REF", "GND");
   r("R84", "1M", bx + 230, by - 24, "BK_ON", "BK_REF");
   c("C99", "100n", bx + 260, by, "+3V3", "GND");
+  c("C14", "10n", bx + 260, by + 14, "VIN_SENSE", "GND"); // keeps the ADC's sampling kick off the comparator input
   // Pack sense for the MCU (stage 3) and the loaded self-test: Q11 drops the
   // pack into R85 for 200 ms while the ADC reads PACK_SENSE.
   // Two 24R 2512 in parallel: 12R, 2 W continuous, and the test is 2.4 J pulses.
-  r("R85", "24R 1W", bx + 300, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
-  r("R88", "24R 1W", bx + 310, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
-  part("Q11", NMOS_60V.libId, "SI4470EY", bx + 300, by + 14);
-  for (const n of ["5", "6", "7", "8"]) label("Q11", n, "TEST_NODE");
-  for (const n of ["1", "2", "3"]) label("Q11", n, "GND");
-  label("Q11", "4", "TEST_LOAD");
-  r("R86", "100k", bx + 330, by - 10, "PACK_F", "PACK_SENSE");
-  r("R87", "11.5k", bx + 330, by + 2, "PACK_SENSE", "GND");
+  r("R85", "24R 2W pulse", bx + 300, by - 10, "BK_MID", "TEST_NODE", FP.r2512);
+  r("R88", "24R 2W pulse", bx + 310, by - 10, "BK_MID", "TEST_NODE", FP.r2512);
+  part("Q11", "Device:Q_NMOS_GSD", "AO3400A", bx + 300, by + 14, FP.sot23); // 1 A from a 3.3 V gate
+  label("Q11", "3", "TEST_NODE");
+  label("Q11", "2", "GND");
+  label("Q11", "1", "TEST_LOAD");
+  // 1M / 115k: 117 uA through the old divider would flatten a stored pack in a year and a half
+  r("R86", "1M 1%", bx + 330, by - 10, "BK_MID", "PACK_SENSE");
+  r("R87", "115k 1%", bx + 330, by + 2, "PACK_SENSE", "GND");
+  c("C13", "100n", bx + 340, by + 2, "PACK_SENSE", "GND");
 
-  // Firmware can drop the battery too (2 s of no load, or the 5 min cap):
-  // Q10 pulls the Q9 gate low regardless of what the comparator says.
+  // Firmware arms the pack switch (BK_EN high) and drops it after 5 s of no
+  // load or the 5 min cap: Q10 is in series with Q9's source, so with BK_EN
+  // low nothing the comparator does can close Q8, and a decaying +3V3 cannot
+  // re-latch it.
   part("Q10", "Device:Q_NMOS_GSD", "2N7002", bx + 210, by + 34, FP.sot23);
-  label("Q10", "3", "BK_DRV");
+  label("Q10", "3", "BK_ARM");
   label("Q10", "2", "GND");
-  label("Q10", "1", "BK_KILL");
-  r("R89", "100k", bx + 210, by + 54, "BK_KILL", "GND");
+  label("Q10", "1", "BK_EN");
+  r("R89", "100k", bx + 210, by + 54, "BK_EN", "GND");
 
   // #region stage 2: radio port
   // Both PoE flavours share the port pins: + on 4/5, - on 7/8 (802.3 Mode B,
@@ -759,29 +914,52 @@ export function buildRadioKiosk(): Schematic {
   // the 12 V rail, and the boost diode blocks 12 V from reaching the boost.
   const px = 560, py = 40;
 
-  // 12 V -> 54 V boost, LM3478 at 400 kHz. Its output is PORT_P itself: the
-  // port positive, the PSE's AGND supply and the eFuse output are one node.
-  // With the boost off that node sits at ~11.5 V through D20, or at 12 V when
-  // the eFuse is on; the PSE is in UVLO below 45 V and holds its switch off. Sized for the radio (10-15 W), not a
-  // full 30 W class-4 load: at D = 0.78 the LM3478 has ~84 mV of sense headroom,
-  // and 20 mR puts the peak switch limit near 4 A.
+  // 12 V -> 54 V boost, LM3478 at 400 kHz. Its output BOOST_OUT reaches the
+  // port, and the PSE's supply (R70 off PORT_P), only through the port switch
+  // Q23. Firmware closes Q23 to let the PSE detect (the PSE probes the PD with
+  // its own 2.8-10 V detection source; PORT_N stays open, so a passive radio
+  // sees no current), opens it again if no signature shows within 700 ms, and
+  // only then turns the eFuse on. So passive 12 V from the eFuse never meets
+  // the boost output, and nothing ever bleeds 54 V down to 12 V. Sized
+  // for the radio (12 W, 24 W worst case) with margin: 15 mR puts the peak
+  // switch limit near 5.3 A (~35 W in at D = 0.78), the inductor is rated 4.5 A.
   part("U20", LM3478.libId, "LM3478 54V boost", px, py);
   part("Q20", NMOS_100V.libId, "AO4482", px + 50, py - 20);
   part("L20", "Device:L", "MDA1365-330M 33u 4.5A", px + 30, py - 40, "Inductor_SMD:L_12x12mm_H8mm");
   part("D20", "Device:D", "SS310 100V Schottky", px + 70, py - 40, FP.sma);
-  r("R20", "20m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
+  r("R20", "15m 1W", px + 50, py + 6, "BOOST_CS", "GND", FP.r2512);
   r("R21", "40.2k", px - 30, py + 14, "BOOST_FA", "GND");
-  r("R22", "402k", px + 100, py - 10, "PORT_P", "BOOST_FB");
+  r("R22", "402k", px + 100, py - 10, "BOOST_OUT", "BOOST_FB");
   r("R23", "9.53k", px + 100, py + 2, "BOOST_FB", "GND");
   c("C20", "100p", px + 110, py + 2, "BOOST_FB", "GND");
   r("R24", "10k", px - 30, py - 10, "BOOST_COMP", "BOOST_COMPC");
   c("C21", "47n", px - 30, py + 2, "BOOST_COMPC", "GND");
   c("C22", "10u/25V", px - 30, py - 30, "+12V", "GND", FP.c1210);
-  c("C23", "4.7u/100V", px + 100, py - 30, "PORT_P", "GND", FP.c1210);
-  c("C24", "4.7u/100V", px + 108, py - 30, "PORT_P", "GND", FP.c1210);
-  part("C25", "Device:C_Polarized", "47u/63V", px + 120, py - 30, FP.cElec8);
-  label("C25", "1", "PORT_P");
+  c("C23", "4.7u/100V", px + 100, py - 30, "BOOST_OUT", "GND", FP.c1210);
+  c("C24", "4.7u/100V", px + 108, py - 30, "BOOST_OUT", "GND", FP.c1210);
+  c("C26", "4.7u/100V", px + 116, py - 30, "BOOST_OUT", "GND", FP.c1210);
+  part("C25", "Device:C_Polarized", "47u/100V", px + 126, py - 30, FP.cElec8);
+  label("C25", "1", "BOOST_OUT");
   label("C25", "2", "GND");
+  // Port switch: P-FET from the boost output to the port, off by default (R27
+  // to source), pulled on through R28 by Q24 from the MCU. D23 holds VGS to
+  // 12 V. With the boost at 54 V and the port at 12 V (passive) the FET body
+  // diode points the wrong way for backfeed, and the eFuse blocks the rest.
+  part("Q23", PMOS_100V.libId, "DMP10H400SE", px + 150, py - 40);
+  label("Q23", "3", "BOOST_OUT");
+  label("Q23", "2", "PORT_P");
+  label("Q23", "4", "PORT_P");
+  label("Q23", "1", "PORT_SW_G");
+  r("R27", "10k", px + 150, py - 20, "BOOST_OUT", "PORT_SW_G");
+  part("D23", "Device:D", "BZT52C12 zener", px + 160, py - 20, "Diode_SMD:D_SOD-123"); // loon has no zener symbol; cathode to the gate side
+  label("D23", "1", "BOOST_OUT"); // cathode at the source: clamps VGS at -12 V
+  label("D23", "2", "PORT_SW_G");
+  r("R28", "47k", px + 150, py, "PORT_SW_G", "PORT_SW_D");
+  part("Q24", "Device:Q_NMOS_GSD", "BSS123", px + 150, py + 20, FP.sot23);
+  label("Q24", "3", "PORT_SW_D");
+  label("Q24", "2", "GND");
+  label("Q24", "1", "PORT_SW");
+  r("R29", "100k", px + 170, py + 20, "PORT_SW", "GND");
   // Shutdown from the MCU through a diode so R21 alone still sets the frequency.
   r("R25", "1k", px - 50, py + 26, "BOOST_SD", "BOOST_SDD");
   part("D21", "Device:D", "1N4148W", px - 40, py + 26, "Diode_SMD:D_SOD-123");
@@ -797,11 +975,11 @@ export function buildRadioKiosk(): Schematic {
   label("U20", "8", "+12V");
   label("Q20", "4", "BOOST_DR");
   for (const n of ["1", "2", "3"]) label("Q20", n, "BOOST_CS");
-  for (const n of ["5", "6", "7", "8", "9"]) label("Q20", n, "BOOST_SW");
+  for (const n of ["5", "6", "7", "8"]) label("Q20", n, "BOOST_SW");
   label("L20", "1", "+12V");
   label("L20", "2", "BOOST_SW");
   label("D20", "2", "BOOST_SW");
-  label("D20", "1", "PORT_P");
+  label("D20", "1", "BOOST_OUT");
 
   // Passive path: TPS26600 eFuse. ILIM 8.06k = 1.5 A (R = 12k / I). IMON into
   // 10k gives 0.78 V per amp on PASSIVE_IMON, so 1.5 A reads 1.17 V at the ADC.
@@ -812,7 +990,7 @@ export function buildRadioKiosk(): Schematic {
   part("U21", TPS26600.libId, "TPS26600 eFuse", ex, ey);
   label("U21", "1", "+12V");
   label("U21", "2", "+12V");
-  label("U21", "3", "GND"); // UVLO default
+  label("U21", "3", "+12V"); // UVLO high = internal 15 V lockout off; the input is 12 V
   nc("U21", "4");
   label("U21", "5", "GND"); // OVP default
   nc("U21", "6"); // MODE open = auto-retry
@@ -831,13 +1009,23 @@ export function buildRadioKiosk(): Schematic {
   r("R61", "10k", ex + 50, ey + 2, "PASSIVE_IMON", "GND");
   c("C60", "10n", ex + 50, ey + 14, "PASSIVE_DVDT", "GND");
   r("R62", "10k", ex + 50, ey + 26, "+3V3", "PASSIVE_FLT");
-  r("R63", "100k", ex - 30, ey + 20, "PASSIVE_EN", "GND");
+  r("R63", "10k", ex - 30, ey + 20, "PASSIVE_EN", "GND"); // holds SHDN low against its 10 uA pull-up
   c("C61", "1u/50V", ex - 30, ey - 10, "+12V", "GND", FP.c1206);
   c("C62", "1u/100V", ex + 70, ey - 10, "PORT_P", "GND", FP.c1210);
   // Passive return: ties PORT_N to ground while PASSIVE_EN is high. Off in
   // active mode so the PSE's own switch owns the return.
-  part("Q13", NMOS_60V.libId, "SI4470EY", ex + 100, ey + 10);
-  label("Q13", "4", "PASSIVE_EN");
+  // The return switch sees up to 56 V when the PSE port is off, and a 3.3 V
+  // gate does not turn a 60 V clone on: AO4482 with a 5 V gate from U31.
+  part("Q13", NMOS_100V.libId, "AO4482", ex + 100, ey + 10);
+  label("Q13", "4", "PASSIVE_EN5");
+  part("U31", AHCT1G125.libId, "SN74AHCT1G125", ex + 80, ey + 30);
+  label("U31", "1", "GND");
+  label("U31", "2", "PASSIVE_EN");
+  label("U31", "3", "GND");
+  label("U31", "4", "PASSIVE_EN5");
+  label("U31", "5", "+5V");
+  c("C16", "100n", ex + 90, ey + 44, "+5V", "GND");
+  r("R66", "10k", ex + 110, ey + 30, "PASSIVE_EN5", "GND");
   for (const n of ["1", "2", "3"]) label("Q13", n, "GND");
   for (const n of ["5", "6", "7", "8"]) label("Q13", n, "PORT_N");
 
@@ -872,7 +1060,7 @@ export function buildRadioKiosk(): Schematic {
   label("D70", "2", "GND");
   part("D71", "Device:D", "S1B clamp", qx - 40, qy + 6, FP.sma);
   label("D71", "2", "PORT_N");
-  label("D71", "1", "PSE_AGND");
+  label("D71", "1", "PORT_P"); // S1B from OUT to the supply side of the 10R (4279fa Fig. 13)
   c("C71", "220n/100V", qx - 40, qy + 18, "PORT_N", "PSE_AGND", FP.c1210);
   r("R71", "200R", qx - 40, qy + 30, "PSE_GATE_DRV", "PSE_GATE");
   part("Q22", PSMN075.libId, "PSMN075-100MSEX", qx - 40, qy + 50);
@@ -893,9 +1081,14 @@ export function buildRadioKiosk(): Schematic {
   // Port protection and the two jacks. J5 is the radio, J6 the laptop; only the
   // data pairs pass through, so the laptop never sees DC and links at 100 Mbps.
   const jx = px + 160, jy = ey + 60;
+  // Port voltage sense: 56 V -> 2.97 V. Reads the port in every mode: the
+  // port switch closed, the eFuse on, and a radio backfeeding an empty port.
+  r("R64", "1M 1%", jx - 60, jy - 30, "PORT_P", "PORT_SENSE");
+  r("R65", "56k 1%", jx - 60, jy - 18, "PORT_SENSE", "GND");
+  c("C15", "10n", jx - 50, jy - 18, "PORT_SENSE", "GND");
   part("D22", "Device:D", "SMAJ58A TVS", jx - 30, jy - 30, FP.sma);
   label("D22", "1", "PORT_P");
-  label("D22", "2", "PORT_N");
+  label("D22", "2", "GND"); // the LTC4279 wants the bulk TVS from the rail to ground
   part("J5", RJ45.libId, "RJ45 radio", jx, jy);
   part("J6", RJ45.libId, "RJ45 laptop", jx + 60, jy);
   for (const p of ["1", "2", "3", "6"]) {
@@ -913,7 +1106,8 @@ export function buildRadioKiosk(): Schematic {
   // self-powered: USB VBUS goes nowhere but the ESD array, so a laptop can
   // never back-drive the 5 V rail and the board must have its brick or its
   // battery to talk. Outputs that matter at reset have a pull so a floating
-  // GPIO means "off": BOOST_SD up (boost off), TEST_LOAD / FAN / BK_KILL down.
+  // GPIO means "off": BOOST_SD up (boost off), TEST_LOAD / FAN / BK_EN /
+  // PORT_SW / USB_DIS down.
   const mx = 560, my = 330;
   part("U40", STM32F072.libId, "STM32F072CBT6", mx, my);
   const mcuPins: Record<string, string> = {
@@ -927,7 +1121,10 @@ export function buildRadioKiosk(): Schematic {
     "16": "FAN_PWM", // PA6 TIM3_CH1
     "29": "LED_DATA", // PA8 TIM1_CH1 (PWM+DMA for the WS2812 stream)
     "21": "PD_SCL", "22": "PD_SDA", // PB10/PB11 I2C2 to the CH224A
-    "31": "BK_KILL", // PA10
+    "31": "BK_EN", // PA10, high arms the pack switch
+    "38": "PORT_SW", // PA15, high closes the port switch (54 V to the jack)
+    "18": "PORT_SENSE", // PB0 ADC8, port voltage 56 V -> 2.97 V
+    "46": "USB_DIS", // PB9, high drops the USB-C input once the DC jack is live
     "39": "BK_ON", "40": "PASSIVE_FLT", "41": "PSE_ON", // PB3-5 inputs
     "32": "USB_D-", "33": "USB_D+", "34": "SWDIO", "37": "SWCLK",
     "42": "UART_TX", "43": "UART_RX", // PB6/PB7 USART1
@@ -940,7 +1137,7 @@ export function buildRadioKiosk(): Schematic {
   c("C131", "100n", mx - 52, my - 40, "+3V3", "GND");
   c("C132", "100n", mx - 44, my - 40, "+3V3", "GND");
   c("C133", "100n", mx - 36, my - 40, "+3V3", "GND");
-  r("R112", "10R", mx - 60, my - 24, "+3V3", "MCU_VDDA");
+  r("R112", "0R", mx - 60, my - 24, "+3V3", "MCU_VDDA"); // ferrite/10R drops VDDA below VDD - 0.3 V under load; the F072 forbids that
   c("C134", "1u", mx - 52, my - 24, "MCU_VDDA", "GND");
   c("C135", "10n", mx - 44, my - 24, "MCU_VDDA", "GND");
   // Reset and boot. NRST has an internal pull-up; the 100n is the datasheet's
@@ -966,7 +1163,7 @@ export function buildRadioKiosk(): Schematic {
   label("J11", "3", "+3V3");
   label("J11", "4", "GND");
   ops.push({ op: "instantiate_module", moduleId: "usb_c_program", params: { vbus_net: "USB_VBUS" }, at: { x: mx + 200, y: my - 60 } });
-  r("R26", "100k", mx - 100, my - 40, "+3V3", "BOOST_SD");
+  r("R26", "10k", mx - 100, my - 40, "+3V3", "BOOST_SD"); // strong enough to win against the LM3478's FA/SD pin
   r("R100", "100k", mx - 100, my - 28, "TEST_LOAD", "GND");
 
   // Two WS2812B behind one AHCT buffer: D30 sits by the power inputs, D31 by
@@ -979,7 +1176,7 @@ export function buildRadioKiosk(): Schematic {
   label("U30", "4", "LED_D0");
   label("U30", "5", "+5V");
   c("C110", "100n", lx, ly + 16, "+5V", "GND");
-  r("R103", "100R", lx + 30, ly, "LED_D0", "LED_D0R");
+  r("R103", "100R", lx + 36, ly + 6, "LED_D0", "LED_D0R");
   part("D30", WS2812B_4020.libId, "WS2812B-4020 power LED", lx + 60, ly);
   label("D30", "2", "+5V");
   label("D30", "4", "GND");
@@ -992,9 +1189,10 @@ export function buildRadioKiosk(): Schematic {
   label("D31", "1", "LED_D1");
   label("D31", "3", "LED_D2");
   // Lid LEDs on a wire: the chain continues out of the box.
+  r("R113", "220R", lx + 116, ly + 6, "LED_D2", "LED_D2W"); // damps the wire to the lid LEDs
   part("J13", XH3.libId, "Lid LEDs", lx + 130, ly);
   label("J13", "1", "+5V");
-  label("J13", "2", "LED_D2");
+  label("J13", "2", "LED_D2W");
   label("J13", "3", "GND");
   c("C112", "100n", lx + 100, ly + 16, "+5V", "GND");
 
@@ -1028,14 +1226,14 @@ export function buildRadioKiosk(): Schematic {
   // #region notes
   const notes: [string, number][] = [
     ["STAGES 1-3 DONE: power tree, radio port, MCU. Stage 4 = the board. Port placement for the board: TOP edge = laptop side (J6 RJ45 laptop, J3 laptop DC out, the USB-C serial). RIGHT edge = power in (J1 PD trigger module, J2 DC jack). BOTTOM edge = radio (J5 RJ45 radio). D30 sits by the power inputs, D31 by the radio jack. Cells on the bottom side.", 560],
-    ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Active: +54V on PORT_P, the PSE switches PORT_N to ground. Passive: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Firmware never enables both: BOOST_SD high whenever PASSIVE_EN is high. Sequence: PSE detect first; valid signature = active; open/invalid = passive.", 650],
+    ["RADIO PORT: PORT_P = pins 4/5, PORT_N = pins 7/8 (Mode B). Unknown port: boost on, Q23 (PORT_SW) closed, PSE_EN: U22 probes the PD. Valid 802.3 signature within 700 ms: active, U22 powers PORT_N, 54 V on the port. No signature: PORT_SW open, PSE_EN off, PORT_P decays through R64, then PASSIVE_EN: U21 eFuse puts 12 V on PORT_P, Q13 grounds PORT_N. Never PORT_SW and PASSIVE_EN together. Empty port: alternate a detect window and a passive window. PORT_SENSE reads the port in every mode; a backfeeding radio shows as PSE fault (active) or IMON > 2 A (passive): cut the port, flash red.", 650],
     ["PSE: LTC4279 (SO-16) per datasheet Figure 13. PORT_P is its AGND supply through R70 10R; board GND is its VEE; Q22 (PSMN075-100MSEX, ADI's recommended FET) switches PORT_N through R72 0.1R. PWRMODE 3.32k = Type 2, 25.5 W. RESET pulled down: port off until the MCU raises PSE_EN. PSE_ON is low while powered. VSSK and R72's ground end must be one Kelvin trace.", 665],
     ["INPUTS: 14-26 V from a USB-C PD trigger module (J1) or a DC jack (J2), ideal-diode ORed. Highest wins. The USB-C PD sink (CH224A) is on the board now, no trigger module. Standard supply is a 24 V 5 A brick; the Toughbook's own 15.6 V brick or a 19-20 V laptop brick also work. J2 and J3 are both 5.5x2.5 so the laptop brick can power the box; a brick in J3 is blocked by U7, a laptop on J2 just sees VIN. VIN_SENSE: 20 V = 2.46 V, 15.6 V = 1.92 V, 13.4 V = 1.65 V (battery takes over), 9 V = 1.11 V, 5 V = 0.61 V.", 575],
     ["RAILS: +12V is the backed-up rail (radio passive output, 54 V PSE boost, 5 V, 3.3 V). LAPTOP_OUT is off the raw input so it sheds itself on a dropout. Bucks are LMR33630 at 400 kHz per datasheet Table 9-1; the laptop one is set to 15.6 V (the Toughbook brick voltage) and runs in dropout on that brick, passing ~15.3 V.", 590],
     ["BACKUP: 4x CR123A (12 V nominal, no boost, no BMS). Q8 closes when Vin < 16 V, opens when it returns. R84 hysteresis. Firmware (stage 3) opens it after 2 s of no radio load or 5 min, by pulling BK_ON low through a diode-OR at R81 (TBD stage 3). Self-test: TEST_LOAD high for 200 ms, read PACK_SENSE; below ~10 V loaded = replace all four cells.", 605],
     ["ASSEMBLY: all SMT except connectors and cell holders, so the BOM is production-ready as is. First units hand-built: every IC is SO / SOT-23 / HTSSOP, passives 0805+, exposed pads (3 bucks, eFuse, FETs) get thermal vias for hot air. No leadless packages.", 620],
     ["OPEN: Passive-mode radio draw (assumed 10 W) and the PD brick's dropout time still need measuring. Laptop rail is off at reset (LAPTOP_EN) and constant-current limited (LAPTOP_ILIM): firmware sets the limit to allocation minus the box draw so a shared charger never trips; what the Toughbook does when limited is untested (bench supply 15.6 V / 2.5 A). USB serial is self-powered: no brick or battery, no console.", 635],
-    ["MCU: STM32F072CBT6 (128 KB), no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE, PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE. ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC9 LAPTOP_ISENSE (1 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 1 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA), PA10 BK_KILL. I2C2 PB10/PB11 reads the CH224A (status, PDO list). In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12, DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PASSIVE_EN and PSE_EN never both high; BOOST_SD low only while PSE_EN is high.", 680],
+    ["MCU: STM32F072CBT6 (128 KB), no radio. ADC: PA0 VIN_SENSE, PA1 PACK_SENSE (1M/115k), PA2 PASSIVE_IMON, PA3 TEMP_SENSE, PA4 FAN_SENSE, ADC5 USB_ISENSE (2 V = 5 A), ADC7 DCIN_SENSE, ADC8 PORT_SENSE (56 V = 2.97 V), ADC9 LAPTOP_ISENSE (0.4 V = 1 A). Out: PB2 LAPTOP_EN (off at reset), PA9 LAPTOP_ILIM_PWM (CC setpoint, 0.4 V = 1 A), PB12 TEST_LOAD, PB13 BOOST_SD (pulled up = off), PB14 PASSIVE_EN, PB15 PSE_EN, PA15 PORT_SW, PA10 BK_EN (high arms the pack), PB9 USB_DIS, PA6 FAN_PWM (TIM3_CH1), PA8 LED_DATA (TIM1_CH1 + DMA). I2C2 PB10/PB11 reads the CH224A (0x22/0x23; no pull-ups until the CH224A is powered). In: PB3 BK_ON, PB4 PASSIVE_FLT, PB5 PSE_ON. USB PA11/PA12 (enable CRS), DFU via BOOT0 button, USART1 PB6/PB7 on J11. Firmware rule: PORT_SW and PASSIVE_EN never both high.", 680],
   ];
   for (const [text, y] of notes) ops.push({ op: "add_text", text, at: { x: 30, y }, size: 2 });
 
@@ -1051,9 +1249,23 @@ export function buildRadioKiosk(): Schematic {
   // hand-built prototype and a JLC-assembled run share one BOM.
   const lcsc: Record<string, string> = {
     U1: "C2941042", U2: "C2941042", U6: "C2941042", U7: "C2941042", // LM74700QDBVRQ1
-    Q1: "C7568913", Q2: "C7568913", Q6: "C7568913", Q7: "C7568913", Q11: "C7568913", Q13: "C7568913", // SI4470EY
-    U3: "C841384", U4: "C841384", U5: "C841384", // LMR33630ADDAR
-    L3: "C2687402", L4: "C2687402", L5: "C2687402", // SRP7028A-100M
+    Q1: "C7568913", Q2: "C7568913", Q6: "C7568913", Q7: "C7568913", Q12: "C7568913", // SI4470EY
+    Q11: "C20917", // AO3400A
+    Q13: "C192576", // AO4482
+    U3: "C841384", U5: "C841384", // LMR33630ADDAR
+    U4: "C130103", // LM3150MHX/NOPB
+    U12: "C2941042", // LM74700QDBVRQ1
+    Q40: "C88370", Q41: "C88370", // AOD4184A
+    L3: "C2847554", // MDA1040-150M
+    L4: "C2847553", // MDA1040-100M
+    L5: "C2687402", // SRP7028A-100M
+    Q23: "C110374", // DMP10H400SE
+    Q24: "C8523", // BSS123
+    D23: "C8100", // BZT52C12
+    U31: "C7484", // SN74AHCT1G125DBVR
+    C4: "C970680", // 47u/63V D8x10
+    C26: "C337978", // 4.7u/100V 1210
+    Q25: "C8545", // 2N7002
     U10: "C702117", // TLV7011DBVR
     U20: "C115907", // LM3478MAX/NOPB
     U21: "C544399", // TPS26600PWPR
@@ -1061,13 +1273,13 @@ export function buildRadioKiosk(): Schematic {
     Q9: "C8545", // 2N7002 (basic)
     Q20: "C192576", // AO4482
     L20: "C2847586", // MDA1365-330M
-    D1: "C148227", D2: "C148227", // SMAJ28A
+    D1: "C118189", D2: "C148227", // SMAJ22A, SMAJ28A
     D20: "C15874", // SS310
     D21: "C2099", // 1N4148W
     D22: "C10762", // SMAJ58A
     F1: "C2838912", // 1206TD-2A
     C97: "C346948", C98: "C346948", // 470u/25V D10x10
-    C25: "C970680", // 47u/63V D8x10
+    C25: "C46224", // 47u/100V D8x10
     C30: "C53084452", C40: "C53084452", C50: "C53084452", // 10u/50V 1210
     C34: "C53084530", C35: "C53084530", C36: "C53084530", C37: "C53084530", // 22u/25V 1210
     C54: "C53084530", C55: "C53084530", C56: "C53084530", C57: "C53084530",
@@ -1092,8 +1304,8 @@ export function buildRadioKiosk(): Schematic {
     J13: "C2316", // XH-3A
     U40: "C2969805", // STM32F072CBT6 (genuine: JLC stock 0, consign from DigiKey; APM32/FCM32 clones in stock are not it)
     U41: "C122228", // INA180A1IDBVR
-    U42: "C192764", // INA180A2IDBVR
-    U43: "C395459", // LMV321
+    U42: "C122228", // INA180A1IDBVR
+    U43: "C7377", // MCP6001T-I/OT
     D40: "C2099", // 1N4148W
     BT1: "C5290177", BT2: "C5290177", BT3: "C5290177", BT4: "C5290177", // BH-123A-A1CJ002
   };
@@ -1116,12 +1328,21 @@ export function buildRadioKiosk(): Schematic {
     const p = inst ? defOf(inst.libId)?.pins.find((x) => x.number === pin) : undefined;
     if (inst && p) late.push({ op: "add_no_connect", at: pinWorld(p, inst) });
   }
+  {
+    const at = new Map<string, Set<string>>();
+    for (const o of late) if (o.op === "add_label") {
+      const k = `${o.at.x.toFixed(2)},${o.at.y.toFixed(2)}`;
+      (at.get(k) ?? at.set(k, new Set()).get(k)!).add(o.text);
+    }
+    const clash = [...at.entries()].filter(([, t]) => t.size > 1);
+    if (clash.length) { console.log("COINCIDENT LABELS:", clash.map(([k, t]) => `${k}: ${[...t].join("/")}`).join("; ")); process.exit(1); }
+  }
   const lateRes = applyOps(schem, late, resolve).results.filter((r) => !r.ok);
   if (lateRes.length) console.log("failed late ops:", [...new Set(lateRes.map((f) => f.error))].join("; "));
 
   // LCSC numbers for module-placed parts, found by symbol rather than ref.
   const byLib: Record<string, string> = {
-    "Connector:USB_C_Receptacle_USB2.0": "C5143397",
+    "Connector:USB_C_Receptacle_USB2.0": "C165948",
     "Power_Protection:USBLC6-2SC6": "C7519",
     "Regulator_Linear:AP2112K-3.3": "C51118",
   };
@@ -1133,9 +1354,11 @@ export function buildRadioKiosk(): Schematic {
   // Pack the sheet before wiring it: the anchors above are spread out so the
   // blocks cannot collide as they are written, and left that way the sheet is
   // several A4 pages wide.
-  const packed = compactSheet(schem, (libId) => resolve(libId)?.def ?? schem.libSymbols[libId]);
+  const packed = compactSheet(schem, (libId) => resolve(libId)?.def ?? schem.libSymbols[libId], { origin: { x: 25, y: 25 } });
   console.log(`compact: ${packed.clusters} blocks, ${packed.before.w}x${packed.before.h} -> ${packed.after.w}x${packed.after.h} mm`);
 
+  // the packed sheet is far bigger than any standard page; size the page to it
+  schem.paper = `User ${Math.ceil(packed.after.w / 10) * 10 + 80} ${Math.ceil(packed.after.h / 10) * 10 + 100}`;
   const wired = autowireSheet(schem, resolve);
   console.log(`autowire: ${wired.drawn} drawn, ${wired.skipped} left joined by name`);
   return schem;

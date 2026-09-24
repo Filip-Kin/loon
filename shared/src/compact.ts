@@ -12,7 +12,7 @@
 // no-connects move with the cluster they belong to.
 
 import type { Schematic, LibSymbol, Point } from "./schematic";
-import { instanceBBox, snapPoint, PLACE_GRID } from "./geometry";
+import { instanceBBox, snapPoint, pinWorld, PLACE_GRID } from "./geometry";
 
 export interface CompactOptions {
   // How far apart two parts can be and still count as the same sub-circuit.
@@ -26,6 +26,9 @@ export interface CompactOptions {
   // Free text (the design notes) is stacked under the packed blocks rather
   // than left wherever it was.
   notesGutter?: number;
+  // Top-left corner of the packed sheet. KiCad's page border sits inside the
+  // first 10 mm or so, so anything packed from 0,0 is drawn under it.
+  origin?: Point;
 }
 
 interface Box { min: Point; max: Point }
@@ -110,10 +113,22 @@ export function compactSheet(
 
   // #region carry the rest
   // Labels, junctions and no-connects sit on pins, so each belongs to the
-  // cluster whose box holds it. A wire belongs to the cluster holding its
-  // first point; one that spans two clusters is redrawn afterwards.
+  // cluster of the symbol whose pin it sits on; only something on no pin at
+  // all falls back to the nearest cluster box. (Two blocks whose boxes
+  // overlap used to steal each other's pin labels, which silently cut nets.)
+  // A wire belongs to the cluster holding its first point; one that spans two
+  // clusters is redrawn afterwards.
   const list = [...clusters.entries()];
+  const pinOwner = new Map<string, string>();
+  const key = (p: Point) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  for (const inst of schem.symbols) {
+    const def = defs(inst.libId);
+    if (!def) continue;
+    for (const pin of def.pins) pinOwner.set(key(pinWorld(pin, { at: inst.at, rotation: inst.rotation, mirror: inst.mirror })), clusterOf.get(inst.uuid)!);
+  }
   const clusterAt = (p: Point): string | null => {
+    const owner = pinOwner.get(key(p));
+    if (owner) return owner;
     let best: string | null = null;
     let bestD = Infinity;
     for (const [id, c] of list) {
@@ -134,12 +149,13 @@ export function compactSheet(
   const widest = Math.max(...order.map(([, c]) => c.box.max.x - c.box.min.x));
   const targetWidth = opts.targetWidth ?? Math.max(widest, Math.sqrt((area * 1.3 * 4) / 3));
   const shift = new Map<string, Point>();
+  const ox = opts.origin?.x ?? 0, oy = opts.origin?.y ?? 0;
   let cx = 0, cy = 0, rowH = 0;
   for (const [id, c] of order) {
     const w = c.box.max.x - c.box.min.x;
     const h = c.box.max.y - c.box.min.y;
     if (cx > 0 && cx + w > targetWidth) { cx = 0; cy += rowH + gutter; rowH = 0; }
-    shift.set(id, snapPoint({ x: cx - c.box.min.x, y: cy - c.box.min.y }, PLACE_GRID));
+    shift.set(id, snapPoint({ x: ox + cx - c.box.min.x, y: oy + cy - c.box.min.y }, PLACE_GRID));
     cx += w + gutter;
     rowH = Math.max(rowH, h);
   }
@@ -172,9 +188,9 @@ export function compactSheet(
 
   // Notes go under the blocks, in the order they were written.
   if (schem.texts?.length) {
-    let ty = packedBottom + notesGutter;
+    let ty = oy + packedBottom + notesGutter;
     for (const t of schem.texts) {
-      t.at = snapPoint({ x: 0, y: ty }, PLACE_GRID);
+      t.at = snapPoint({ x: ox, y: ty }, PLACE_GRID);
       ty += Math.max(t.size * 2, 6);
     }
   }

@@ -259,7 +259,9 @@ export function serializeSchematic(schem: Schematic, libRaw: Record<string, SxLi
   push(node("generator", str(schem.generator)));
   push(node("generator_version", str("10.0")));
   push(node("uuid", str(schem.uuid)));
-  push(node("paper", str(schem.paper)));
+  // "User 700 660" is a custom page: KiCad wants (paper "User" 700 660)
+  const paper = schem.paper.split(/\s+/);
+  push(node("paper", str(paper[0]), ...paper.slice(1).map((v) => num(Number(v)))));
 
   if (schem.title || schem.company || schem.rev) {
     const tb: Sx[] = [];
