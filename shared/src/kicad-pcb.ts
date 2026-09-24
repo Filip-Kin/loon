@@ -103,7 +103,28 @@ function emitFootprint(f: PlacedFootprint, raw: SxList | undefined, netIndex: Ma
   return fpNode;
 }
 
-export function serializeBoard(board: Board, rawFootprints: Record<string, SxList>): string {
+export type Box = { min: { x: number; y: number }; max: { x: number; y: number } };
+// The reference sits above the part on the board whatever the part's
+// rotation: the land pattern puts it above its own outline, and a turned
+// instance moves it to the local side that ends up on top, counter-turned
+// so it reads upright.
+function uprightReference(fpNode: SxList, rotation: number, box: Box | undefined) {
+  if (!box) return;
+  const r = ((rotation % 360) + 360) % 360;
+  if (r === 0) return;
+  const pad = 0.9;
+  const at = r === 90 ? [box.max.x + pad, 0, 270] : r === 270 ? [box.min.x - pad, 0, 90] : r === 180 ? [0, box.max.y + pad, 180] : null;
+  if (!at) return;
+  for (const it of fpNode.items) {
+    if (it.kind !== "list") continue;
+    const head = it.items[0]?.kind === "atom" ? it.items[0].value : "";
+    const isRef = (head === "property" && it.items[1]?.kind === "atom" && it.items[1].value === "Reference") || (head === "fp_text" && it.items[1]?.kind === "atom" && it.items[1].value === "reference");
+    if (!isRef) continue;
+    setChild(it, "at", node("at", num(at[0]), num(at[1]), num(at[2])));
+  }
+}
+
+export function serializeBoard(board: Board, rawFootprints: Record<string, SxList>, boxes: Record<string, Box> = {}): string {
   const root = list(sym("kicad_pcb"));
   // Board format version must match what the embedded footprints were written
   // for, or KiCad refuses the file outright.
@@ -184,7 +205,11 @@ export function serializeBoard(board: Board, rawFootprints: Record<string, SxLis
     i++;
   }
 
-  for (const f of board.footprints) root.items.push(emitFootprint(f, rawFootprints[f.libId], netIndex, board.rules.minDrill));
+  for (const f of board.footprints) {
+    const fpNode = emitFootprint(f, rawFootprints[f.libId], netIndex, board.rules.minDrill);
+    if (f.side !== "B") uprightReference(fpNode, f.rotation, boxes[f.libId]);
+    root.items.push(fpNode);
+  }
 
   // Silkscreen text.
   for (const t of board.texts ?? []) {

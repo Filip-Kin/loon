@@ -95,8 +95,10 @@ const CONNECTORS: Connector[] = [
   { ref: "J11", at: { x: 70, y: 5 }, face: "N", rotation: 90 },  // UART
   { ref: "J8", at: { x: 9.5, y: 80 }, face: "W", rotation: 0 },  // fan (internal), left column
   { ref: "J13", at: { x: 10.5, y: 87 }, face: "W", rotation: 0 }, // lid LED cable
-  { ref: "D30", at: { x: 83, y: 21.5 }, face: "E", rotation: 90 }, // power LED at the wall between J1 and J2
-  { ref: "D31", at: { x: 30.5, y: 121 }, face: "S", rotation: 0 }, // radio LED at the wall beside J5
+  // WS2812B-4020: the lens is on the side opposite the pads (datasheet), so
+  // the pad edge faces into the board.
+  { ref: "D30", at: { x: 83, y: 21.5 }, face: "E", rotation: 270 }, // power LED at the wall between J1 and J2
+  { ref: "D31", at: { x: 30.5, y: 121 }, face: "S", rotation: 180 }, // radio LED at the wall beside J5
 ];
 // The RJ45s sit 4 mm in from the left so the Ethernet lanes (x 8-10 beside
 // the jacks) pass between the corner hole and the jack's peg.

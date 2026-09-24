@@ -228,6 +228,9 @@ export interface RouteOptions {
   // Route GND as tracks as well; the pours still fill on top. Off, GND is
   // left to the pours alone, which strands any pad they cannot reach.
   routeGnd?: boolean;
+  // Skip Freerouting and import the board.ses already there (after a fix
+  // to the import step, or to re-read a finished run).
+  importOnly?: boolean;
 }
 
 export async function routeWithFreerouting(project: string, unit = "", opts: RouteOptions | number = 30): Promise<RouteReport> {
@@ -242,7 +245,11 @@ export async function routeWithFreerouting(project: string, unit = "", opts: Rou
     return { ok: false, seconds: (Date.now() - t0) / 1000, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [...notes, note] };
   };
 
-  if (o.keepTracks && existsSync(join(dir, "board.ses"))) {
+  if (o.importOnly) {
+    if (!existsSync(join(dir, "board.ses"))) return fail("no board.ses to import");
+    notes.push("imported the existing board.ses, Freerouting not run");
+  }
+  if (!o.importOnly && o.keepTracks && existsSync(join(dir, "board.ses"))) {
     const board = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
     const dirty = new Set<string>();
     for (const f of board.footprints) if ((o.dirtyRefs ?? []).includes(f.ref)) for (const n of Object.values(f.padNets)) dirty.add(n);
@@ -261,36 +268,39 @@ print('kept', len(list(b.Tracks())), 'dropped', n)
     notes.push(`previous copper: ${pre.out.trim().split("\n").pop()} (nets on ${(o.dirtyRefs ?? []).join(", ") || "nothing"} redone)`);
   }
 
-  const dsn = await kicadPy(dir, `
-import pcbnew
-b = pcbnew.LoadBoard('/work/board.kicad_pcb')
-ok = pcbnew.ExportSpecctraDSN(b, '/work/board.dsn')
-print('dsn', ok)
-`);
-  if (!/dsn True/.test(dsn.out)) return fail(`DSN export failed: ${dsn.out.trim().split("\n").pop()}`);
+  if (!o.importOnly) {
+    const dsn = await kicadPy(dir, `
+  import pcbnew
+  b = pcbnew.LoadBoard('/work/board.kicad_pcb')
+  ok = pcbnew.ExportSpecctraDSN(b, '/work/board.dsn')
+  print('dsn', ok)
+  `);
+    if (!/dsn True/.test(dsn.out)) return fail(`DSN export failed: ${dsn.out.trim().split("\n").pop()}`);
 
-  // Ground is the pour on both sides; routing it as tracks wastes the router's
-  // effort and the board's space. Take it out of the DSN's network section.
-  if (!o.routeGnd) await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
-  await run(["chmod", "777", dir], 10000);
-  prog.set({ stage: "fanout", fraction: 0.02 });
-  const fr = await runStreaming([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
-    "java", "-jar", "/app/freerouting-executable.jar", "--user_data_path=/work/.freerouting", "--gui-enabled=false",
-    "-de", "/work/board.dsn", "-do", "/work/board.ses", "-mp", String(passes), "-mt", "8"], 3600000, (l) => prog.line(l));
-  // Freerouting ran as root, so its scratch dir and the SES are root's: clean
-  // up and hand them back the same way.
-  await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, "--entrypoint", "sh", FREEROUTING, "-c", `rm -rf /work/.freerouting; chown ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} /work/board.ses /work/board.dsn 2>/dev/null; true`], 30000);
-  if (!existsSync(join(dir, "board.ses"))) return fail(`Freerouting wrote no session: ${fr.out.split("\n").filter((l) => /ERROR|Exception/.test(l)).slice(-2).join(" | ")}`);
-  prog.set({ stage: "import", fraction: 0.95, etaSeconds: 60 });
-  const frInfo = fr.out.split("\n").filter((l) => /INFO/.test(l) && /rout|pass|complete/i.test(l)).slice(-2).map((l) => l.replace(/^.*INFO\s+/, ""));
-  notes.push(...frInfo);
+    // Ground is the pour on both sides; routing it as tracks wastes the router's
+    // effort and the board's space. Take it out of the DSN's network section.
+    if (!o.routeGnd) await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
+    await run(["chmod", "777", dir], 10000);
+    prog.set({ stage: "fanout", fraction: 0.02 });
+    const fr = await runStreaming([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
+      "java", "-jar", "/app/freerouting-executable.jar", "--user_data_path=/work/.freerouting", "--gui-enabled=false",
+      "-de", "/work/board.dsn", "-do", "/work/board.ses", "-mp", String(passes), "-mt", "8"], 3600000, (l) => prog.line(l));
+    // Freerouting ran as root, so its scratch dir and the SES are root's: clean
+    // up and hand them back the same way.
+    await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, "--entrypoint", "sh", FREEROUTING, "-c", `rm -rf /work/.freerouting; chown ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} /work/board.ses /work/board.dsn 2>/dev/null; true`], 30000);
+    if (!existsSync(join(dir, "board.ses"))) return fail(`Freerouting wrote no session: ${fr.out.split("\n").filter((l) => /ERROR|Exception/.test(l)).slice(-2).join(" | ")}`);
+    prog.set({ stage: "import", fraction: 0.95, etaSeconds: 60 });
+    const frInfo = fr.out.split("\n").filter((l) => /INFO/.test(l) && /rout|pass|complete/i.test(l)).slice(-2).map((l) => l.replace(/^.*INFO\s+/, ""));
+    notes.push(...frInfo);
+  }
 
+  // Ground is the pour. Import the session and fill.
+  prog.set({ stage: "import", fraction: 0.95, etaSeconds: 90 });
   const imp = await kicadPy(dir, `
 import pcbnew
 b = pcbnew.LoadBoard('/work/board.kicad_pcb')
 pcbnew.ImportSpecctraSES(b, '/work/board.ses')
-zones = b.Zones()
-pcbnew.ZONE_FILLER(b).Fill(zones)
+pcbnew.ZONE_FILLER(b).Fill(b.Zones())
 b.BuildConnectivity()
 pcbnew.SaveBoard('/work/board.kicad_pcb', b)
 tracks = [t for t in b.Tracks() if t.GetClass() == 'PCB_TRACK']
@@ -299,6 +309,25 @@ print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconn
 `);
   const m = imp.out.match(/result (\d+) (\d+) (\d+)/);
   const tracks = m ? Number(m[1]) : 0, vias = m ? Number(m[2]) : 0, open = m ? Number(m[3]) : 0;
+  if (!m) notes.push(`import failed: ${imp.out.trim().split("\n").slice(-3).join(" | ")}`);
+  // Any GND pad the pour left on its own (KiCad's DRC lists them) gets a
+  // via beside it and a stub, so the other side's pour picks it up; then
+  // fill again and ask DRC again. Two rounds.
+  if (!o.routeGnd && m) {
+    let added = 0;
+    for (let round = 0; round < 2; round++) {
+      prog.set({ stage: "drc", fraction: 0.96 + round * 0.01, etaSeconds: 60 });
+      const gndPads = await unconnectedGndPads(project, unit);
+      if (round === 0) notes.push(`GND ends without ground after the fill: ${gndPads.length}`);
+      if (!gndPads.length) break;
+      const st = await kicadPy(dir, stitchScript(gndPads));
+      const sm = st.out.match(/stitched (\d+) of (\d+)/);
+      if (!sm) { notes.push(`GND stitching failed: ${st.out.trim().split("\n").pop()}`); break; }
+      added += Number(sm[1]);
+      if (Number(sm[1]) === 0) break;
+    }
+    if (added) notes.push(`GND stitching: ${added} vias added`);
+  }
 
   prog.set({ stage: "drc", fraction: 0.98, etaSeconds: 30 });
   const drc = await runDrcJson(project, unit);
@@ -306,6 +335,78 @@ print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconn
   const ok = open === 0 && drc.violations === 0;
   prog.finish(ok, `${tracks} tracks, ${open} open, ${drc.violations} DRC`);
   return { ok, seconds: (Date.now() - t0) / 1000, tracks, vias, open, drcViolations: drc.violations, drcUnconnected: drc.unconnected, drcByRule: drc.byRule, notes };
+}
+
+// GND items KiCad's DRC reports as unconnected: both ends of every open
+// GND link (pads, or track and via ends), by position.
+async function unconnectedGndPads(project: string, unit: string): Promise<{ x: number; y: number }[]> {
+  await runDrcJson(project, unit);
+  const f = join(storage.projectDir(project, unit), "drc.json");
+  if (!existsSync(f)) return [];
+  const d = JSON.parse(await Bun.file(f).text()) as { unconnected_items?: { items: { description: string; pos: { x: number; y: number } }[] }[] };
+  const out: { x: number; y: number }[] = [];
+  const seen = new Set<string>();
+  for (const u of d.unconnected_items ?? []) for (const it of u.items) {
+    if (!/\[GND\]/.test(it.description)) continue;
+    const k = `${it.pos.x},${it.pos.y}`;
+    if (!seen.has(k)) { seen.add(k); out.push(it.pos); }
+  }
+  return out;
+}
+// A via 0.7 mm off each listed pad (first of eight directions with room)
+// and a stub to it, then a fresh fill.
+function stitchScript(pads: { x: number; y: number }[]): string {
+  return `
+import pcbnew, math, json
+b = pcbnew.LoadBoard('/work/board.kicad_pcb')
+MM = pcbnew.FromMM
+gnd = b.GetNetcodeFromNetname('GND')
+want = json.loads('${JSON.stringify(pads)}')
+def clear(c, r):
+    for fp in b.GetFootprints():
+        for pad in fp.Pads():
+            if pad.GetNetCode() == gnd: continue
+            sz = pad.GetSize()
+            if (pad.GetPosition() - c).EuclideanNorm() < r + max(sz.x, sz.y) / 2: return False
+    for t in b.Tracks():
+        if t.GetNetCode() == gnd: continue
+        if t.GetClass() == 'PCB_VIA':
+            if (t.GetPosition() - c).EuclideanNorm() < r + t.GetWidth() / 2: return False
+        elif pcbnew.SEG(t.GetStart(), t.GetEnd()).Distance(c) < r + t.GetWidth() / 2: return False
+    return True
+done = 0
+for w in want:
+    target = pcbnew.VECTOR2I(MM(w['x']), MM(w['y']))
+    pad = None
+    for fp in b.GetFootprints():
+        for q in fp.Pads():
+            if q.GetNetCode() == gnd and (q.GetPosition() - target).EuclideanNorm() < MM(0.05): pad = q
+    if pad is None:
+        # a track or via end: a via right there ties it to the other side's pour
+        tr = None
+        for t in b.Tracks():
+            if t.GetNetCode() == gnd and t.GetClass() == 'PCB_TRACK' and pcbnew.SEG(t.GetStart(), t.GetEnd()).Distance(target) < MM(0.05): tr = t
+        if tr is None: continue
+        if clear(target, MM(0.3) + MM(0.25)):
+            v = pcbnew.PCB_VIA(b); v.SetPosition(target); v.SetWidth(MM(0.6)); v.SetDrill(MM(0.3)); v.SetNetCode(gnd); v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); b.Add(v)
+            done += 1
+        continue
+    p = pad.GetPosition(); sz = pad.GetSize()
+    d = max(sz.x, sz.y) / 2 + MM(0.7)
+    layer = pcbnew.F_Cu if pad.IsOnLayer(pcbnew.F_Cu) else pcbnew.B_Cu
+    for k in range(8):
+        a = k * math.pi / 4
+        c = pcbnew.VECTOR2I(int(p.x + d * math.cos(a)), int(p.y + d * math.sin(a)))
+        if not clear(c, MM(0.3) + MM(0.25)): continue
+        v = pcbnew.PCB_VIA(b); v.SetPosition(c); v.SetWidth(MM(0.6)); v.SetDrill(MM(0.3)); v.SetNetCode(gnd); v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu); b.Add(v)
+        t = pcbnew.PCB_TRACK(b); t.SetStart(p); t.SetEnd(c); t.SetWidth(MM(0.4)); t.SetLayer(layer); t.SetNetCode(gnd); b.Add(t)
+        done += 1
+        break
+pcbnew.ZONE_FILLER(b).Fill(b.Zones())
+b.BuildConnectivity()
+pcbnew.SaveBoard('/work/board.kicad_pcb', b)
+print('stitched %d of %d' % (done, len(want)))
+`;
 }
 
 async function runDrcJson(project: string, unit: string): Promise<{ violations: number; unconnected: number; byRule: { rule: string; count: number }[] }> {

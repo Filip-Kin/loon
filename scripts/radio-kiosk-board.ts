@@ -312,7 +312,8 @@ export async function writeBoard(p: Prepared, project: string | undefined, place
   const raw: Record<string, unknown> = {};
   for (const [id, fp] of Object.entries(footprints)) if (fp.raw) raw[id] = fp.raw;
   await storage.writeFile(project, "board.loon.json", JSON.stringify(board, null, 2));
-  await storage.writeFile(project, "board.kicad_pcb", serializeBoard(board, raw));
+  const boxes = Object.fromEntries(Object.entries(footprints).map(([id, fp]) => [id, fp.bbox]));
+  await storage.writeFile(project, "board.kicad_pcb", serializeBoard(board, raw, boxes));
   await storage.writeFile(project, "board.kicad_pro", serializeProject(board, "board"));
   console.log(`wrote ${project}/board.*`);
 }
