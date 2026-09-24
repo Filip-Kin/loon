@@ -517,6 +517,11 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     f.at = p.at;
     f.rotation = p.rotation;
     f.side = p.side;
+    // the file's footprint id and value are the current ones (a footprint swapped
+    // or renamed in KiCad must not keep loon's old id, or it cannot be drawn)
+    const lv = libAndValue.get(f.ref);
+    if (lv?.libId) f.libId = lv.libId;
+    if (lv?.value) f.value = lv.value;
     const pn = padNetsByRef.get(f.ref);
     if (pn && Object.keys(pn).length) f.padNets = pn;
   }

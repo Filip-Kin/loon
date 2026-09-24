@@ -151,7 +151,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       const res = await trpc.pcb.load.query({ project, board: unit });
       if (res.board) {
         setBoard(withTextIds(res.board as Board));
-        if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
+        if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, project, board: unit, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
         return;
       }
       // No board yet: opening this view is the request for one.
@@ -189,7 +189,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       const res = await trpc.pcb.syncFromDisk.mutate({ project, board: unit });
       past.current = []; future.current = [];
       setBoard(withTextIds(res.board as Board));
-      if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
+      if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, project, board: unit, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
       setDirty(false);
       const n = res.note;
       setRouteNote(`From disk: ${n.tracks} tracks, ${n.vias} vias, ${n.moved} moved, ${n.texts} texts`);
@@ -263,7 +263,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       const res = await trpc.pcb.generate.mutate({ project, schem, keepPlacement, board: unit });
       setBoard(withTextIds(res.board as Board));
       setDirty(false);
-      setFps(await trpc.pcb.footprints.mutate({ schem }));
+      setFps(await trpc.pcb.footprints.mutate({ schem, project, board: unit }));
       const notes: string[] = [`Placed ${res.placed} parts.`];
       if (res.missingFootprints.length) notes.push(`${res.missingFootprints.length} parts have no footprint.`);
       if (res.approximate.length) notes.push(`${res.approximate.length} land patterns are generated, not KiCad's.`);

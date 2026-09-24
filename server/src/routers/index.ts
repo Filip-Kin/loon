@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseFootprint, type Footprint } from "@loon/shared/footprint";
 import { join } from "node:path";
 import { layCopper } from "../services/copper";
 import { router, publicProcedure } from "../trpc";
@@ -576,8 +577,30 @@ const pcbRouter = router({
   // whatever the board itself carries (parts that arrived through KiCad and a
   // sync are on the board before the browser's copy of the schematic knows them).
   footprints: publicProcedure
-    .input(z.object({ schem: z.any(), libIds: z.array(z.string()).optional() }))
+    .input(z.object({ schem: z.any(), libIds: z.array(z.string()).optional(), project: z.string().optional(), board: z.string().optional() }))
     .mutation(async ({ input }) => {
+      // A board KiCad has saved carries the exact geometry of every part it
+      // holds; draw that, so the layout view can never show a land pattern
+      // KiCad does not have (a failed library fetch used to draw a generic box).
+      if (input.project && (await kicadOwnsBoard(input.project, input.board ?? ""))) {
+        const text = await storage.readFile(input.project, "board.kicad_pcb", input.board ?? "");
+        const out: Record<string, Footprint> = {};
+        for (const m of text.matchAll(/\n\t\(footprint "([^"]*)"\n[\s\S]*?\n\t\)/g)) {
+          const libId = m[1];
+          if (out[libId]) continue;
+          const block = m[0].slice(1);
+          if (/^\t\t\(layer "B\./m.test(block)) continue;   // back parts: stored mirrored, use the library copy
+          const rot = Number(block.match(/^\t\t\(at -?[\d.]+ -?[\d.]+(?: (-?[\d.]+))?\)/m)?.[1] ?? 0);
+          const fp = parseFootprint(block, libId);
+          // pad angles in a board file are absolute; the model wants them relative to the part
+          for (const pad of fp.pads) pad.rotation = ((((pad.rotation ?? 0) - rot) % 360) + 360) % 360;
+          fp.fromLibrary = true;
+          out[libId] = fp;
+        }
+        const specs = new Map<string, number>();
+        for (const id of input.libIds ?? []) if (id && !out[id]) specs.set(id, 2);
+        return { ...(await getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })))), ...out };
+      }
       const schem = input.schem as Schematic;
       const specs = new Map<string, number>();
       for (const s of schem.symbols) {
