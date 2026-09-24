@@ -12,7 +12,7 @@ import type { Point } from "./schematic";
 import type { Footprint } from "./footprint";
 import type { Board, Track, Via } from "./board";
 import type { Netlist } from "./netlist";
-import { padWorld } from "./pcbgen";
+import { localWorld, padWorld } from "./pcbgen";
 
 export interface RouteOptions {
   pitch?: number; // grid, mm
