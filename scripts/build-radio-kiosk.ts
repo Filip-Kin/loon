@@ -211,6 +211,19 @@ const TPS26600: IcSymbolSpec = {
   ],
 };
 
+// SOIC-8 power FETs really are S on 1-3, G on 4, D on 5-8 (the 1EP pattern's
+// tab is the drain). A three-pin symbol on this pattern puts the gate on a
+// source pin and floats the drain, which is what the first cut of v2 did.
+const SOIC8_FET_PINS: IcSymbolSpec["pins"] = [
+  { number: "1", name: "S", type: "passive", side: "left" },
+  { number: "2", name: "S", type: "passive", side: "left" },
+  { number: "3", name: "S", type: "passive", side: "left" },
+  { number: "4", name: "G", type: "input", side: "left" },
+  { number: "5", name: "D", type: "passive", side: "right" },
+  { number: "6", name: "D", type: "passive", side: "right" },
+  { number: "7", name: "D", type: "passive", side: "right" },
+  { number: "8", name: "D", type: "passive", side: "right" },
+];
 const NMOS_100V: IcSymbolSpec = {
   libId: "Transistor_FET:Power_NMOS_100V",
   refPrefix: "Q",
@@ -218,11 +231,16 @@ const NMOS_100V: IcSymbolSpec = {
   description: "100 V N-channel power MOSFET, SOIC-8. The boost switch for the 54 V rail: 60 V is too close to a 54 V output plus ringing.",
   keywords: "mosfet n-channel power 100v",
   footprint: FP.soic8ep,
-  pins: [
-    { number: "1", name: "G", type: "input", side: "left" },
-    { number: "2", name: "S", type: "passive", side: "left" },
-    { number: "3", name: "D", type: "passive", side: "right" },
-  ],
+  pins: [...SOIC8_FET_PINS, { number: "9", name: "D", type: "passive", side: "right" }],
+};
+const NMOS_60V: IcSymbolSpec = {
+  libId: "Transistor_FET:Power_NMOS_60V_SO8",
+  refPrefix: "Q",
+  value: "SI4470EY N-MOSFET 60V",
+  description: "60 V 10 A N-channel MOSFET, SOIC-8: the ideal-diode pass elements, the port FET and the pack test-load switch.",
+  keywords: "mosfet n-channel power 60v",
+  footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+  pins: SOIC8_FET_PINS,
 };
 
 const RJ45: IcSymbolSpec = {
@@ -492,7 +510,7 @@ export function buildRadioKiosk(): Schematic {
   const nc = (ref: string, pin: string) => noConnects.push({ ref, pin });
   const footprints: [string, string][] = [];
 
-  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
+  for (const spec of [LM74700, LMR33630, TLV7011, PMOS_40V, NMOS_60V, CR123A, BARREL, LM3478, TPS26600, NMOS_100V, RJ45, LTC4279, PSMN075, STM32F072, SWD_HDR, INA180, INA180A2, LMV321, AHCT1G125, WS2812B, WS2812B_4020, USBC_PD, CH224A, NTC, XH3]) ops.push({ op: "define_symbol", ...spec });
 
   const part = (ref: string, libId: string, value: string, x: number, y: number, fp?: string, rotation?: number) => {
     ops.push({ op: "add_symbol", libId, ref, value, at: { x, y }, rotation });
@@ -514,7 +532,7 @@ export function buildRadioKiosk(): Schematic {
   const idealDiode = (n: number, inNet: string, outNet: string, x: number, y: number) => {
     const u = `U${n}`, q = `Q${n}`, cc = `C${n}`;
     part(u, LM74700.libId, "LM74700-Q1", x, y);
-    part(q, "Transistor_FET:Power_NMOS_60V", "SI4470EY", x + 30, y - 10, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
+    part(q, NMOS_60V.libId, "SI4470EY", x + 30, y - 10);
     c(cc, "100n", x + 30, y + 14, `${u}_VCAP`, inNet);
     label(u, "1", `${u}_VCAP`);
     label(u, "2", "GND");
@@ -522,9 +540,9 @@ export function buildRadioKiosk(): Schematic {
     label(u, "4", outNet);
     label(u, "5", `${u}_GATE`);
     label(u, "6", inNet);
-    label(q, "1", `${u}_GATE`);
-    label(q, "2", inNet);
-    label(q, "3", outNet);
+    label(q, "4", `${u}_GATE`);
+    for (const n of ["1", "2", "3"]) label(q, n, inNet);
+    for (const n of ["5", "6", "7", "8"]) label(q, n, outNet);
   };
 
   // An LMR33630 buck at 400 kHz. Values are the datasheet's Table 9-1 rows for
@@ -589,7 +607,7 @@ export function buildRadioKiosk(): Schematic {
   label("U50", "11", "GND");
   r("R120", "120k 1%", 50, 60, "PD_CFG1", "GND"); // 120k = 20 V (CH224 Table 5-1)
   c("C140", "1u/50V", 50, 70, "VIN_USB", "GND", FP.c1206);
-  r("R121", "10k", 50, 80, "+3V3", "PD_PG");
+  r("R121", "10k", 62, 80, "+3V3", "PD_PG"); // not under C140: their pin ends would meet and join +3V3 to GND
   part("J2", BARREL.libId, "DC in 18-26V, PJ-002BH 5.5x2.5", 30, 90);
   label("J2", "1", "VIN_DC");
   label("J2", "2", "GND");
@@ -716,10 +734,10 @@ export function buildRadioKiosk(): Schematic {
   // Two 24R 2512 in parallel: 12R, 2 W continuous, and the test is 2.4 J pulses.
   r("R85", "24R 1W", bx + 300, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
   r("R88", "24R 1W", bx + 310, by - 10, "PACK_F", "TEST_NODE", FP.r2512);
-  part("Q11", "Transistor_FET:Power_NMOS_60V", "SI4470EY", bx + 300, by + 14, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
-  label("Q11", "3", "TEST_NODE");
-  label("Q11", "2", "GND");
-  label("Q11", "1", "TEST_LOAD");
+  part("Q11", NMOS_60V.libId, "SI4470EY", bx + 300, by + 14);
+  for (const n of ["5", "6", "7", "8"]) label("Q11", n, "TEST_NODE");
+  for (const n of ["1", "2", "3"]) label("Q11", n, "GND");
+  label("Q11", "4", "TEST_LOAD");
   r("R86", "100k", bx + 330, by - 10, "PACK_F", "PACK_SENSE");
   r("R87", "11.5k", bx + 330, by + 2, "PACK_SENSE", "GND");
 
@@ -776,9 +794,9 @@ export function buildRadioKiosk(): Schematic {
   label("U20", "6", "BOOST_DR");
   label("U20", "7", "BOOST_FA");
   label("U20", "8", "+12V");
-  label("Q20", "1", "BOOST_DR");
-  label("Q20", "2", "BOOST_CS");
-  label("Q20", "3", "BOOST_SW");
+  label("Q20", "4", "BOOST_DR");
+  for (const n of ["1", "2", "3"]) label("Q20", n, "BOOST_CS");
+  for (const n of ["5", "6", "7", "8", "9"]) label("Q20", n, "BOOST_SW");
   label("L20", "1", "+12V");
   label("L20", "2", "BOOST_SW");
   label("D20", "2", "BOOST_SW");
@@ -817,10 +835,10 @@ export function buildRadioKiosk(): Schematic {
   c("C62", "1u/100V", ex + 70, ey - 10, "PORT_P", "GND", FP.c1210);
   // Passive return: ties PORT_N to ground while PASSIVE_EN is high. Off in
   // active mode so the PSE's own switch owns the return.
-  part("Q13", "Transistor_FET:Power_NMOS_60V", "SI4470EY", ex + 100, ey + 10, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm");
-  label("Q13", "1", "PASSIVE_EN");
-  label("Q13", "2", "GND");
-  label("Q13", "3", "PORT_N");
+  part("Q13", NMOS_60V.libId, "SI4470EY", ex + 100, ey + 10);
+  label("Q13", "4", "PASSIVE_EN");
+  for (const n of ["1", "2", "3"]) label("Q13", n, "GND");
+  for (const n of ["5", "6", "7", "8"]) label("Q13", n, "PORT_N");
 
   // 802.3at PSE: LTC4279 wired per its datasheet Figure 13. Port positive is
   // PORT_P (the chip's AGND supply, through the 10 R surge resistor), board
@@ -1120,6 +1138,11 @@ if (import.meta.main) {
   const schem = buildRadioKiosk();
   const defs = (libId: string) => library.get(libId)?.def ?? schem.libSymbols[libId];
   const nl = buildNetlist(schem, defs);
+  // two rails on one net means two pin ends met on the sheet (it happened
+  // with +3V3 and GND): refuse to write that
+  const RAIL = /^(GND|\+\d|VIN|VBUS|PACK_P|PORT_P|LAPTOP_OUT)/;
+  const merged = nl.nets.filter((n) => n.labels.filter((l) => RAIL.test(l)).length > 1);
+  if (merged.length) { console.log("RAILS MERGED: " + merged.map((n) => n.labels.join("=")).join(", ")); process.exit(1); }
   console.log(`${schem.symbols.length} parts, ${nl.nets.length} nets, ${schem.labels.length} labels`);
   console.log("biggest nets:", [...nl.nets].sort((a, b) => b.pins.length - a.pins.length).slice(0, 8).map((n) => `${n.name}=${n.pins.length}`).join(" "));
   console.log(formatErc(runErc(schem, defs, nl), 15));
