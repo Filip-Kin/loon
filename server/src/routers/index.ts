@@ -607,6 +607,17 @@ const pcbRouter = router({
         { libId: "MountingHole:MountingHole_3.2mm_M3", padCount: 0 },
       ]);
       const unit = input.board ?? "";
+      // A board KiCad has saved is KiCad's: regenerating it here would throw
+      // away its footprints, routing, pours and net classes. Re-read it instead;
+      // new or changed parts come in through KiCad's "Update PCB from Schematic".
+      let kicadOwned = false;
+      try { kicadOwned = /\(generator "pcbnew"\)/.test((await storage.readFile(input.project, "board.kicad_pcb", unit)).slice(0, 300)); } catch { /* no board yet */ }
+      if (kicadOwned) {
+        const r = await syncFromKicad(input.project, unit);
+        const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
+        return { board, placed: 0, missingFootprints: [] as string[], approximate: [] as string[],
+          notes: [`board.kicad_pcb belongs to KiCad, so loon re-read it (${r.tracks} tracks, ${r.added} parts added, ${r.dropped} dropped) instead of regenerating. Use Update PCB from Schematic in KiCad for schematic changes.`] };
+      }
       let existing: Board | undefined;
       if (input.keepPlacement) {
         try {
