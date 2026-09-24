@@ -65,6 +65,8 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [drc, setDrc] = useState<DrcIssue[]>([]);
   const [unrouted, setUnrouted] = useState(0);
+  const [renders, setRenders] = useState<string[]>([]);
+  const [routeNote, setRouteNote] = useState<string>("");
   const [tool, setTool] = useState<"move" | "track">("move");
   const [layer, setLayer] = useState("F.Cu");
   const [trackStart, setTrackStart] = useState<{ at: Point; net: string } | null>(null);
@@ -79,6 +81,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   useEffect(() => {
     (async () => {
       const res = await trpc.pcb.load.query({ project, board: unit });
+      try { setRenders(await trpc.pcb.renders.query({ project, board: unit })); } catch { /* none yet */ }
       if (res.board) {
         setBoard(res.board as Board);
         if (schem) setFps(await trpc.pcb.footprints.mutate({ schem }));
@@ -121,6 +124,39 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     }
     setBusy(null);
   }
+  // Freerouting through KiCad, in containers on the server. Minutes, not seconds.
+  async function autoroute() {
+    if (!board) return;
+    setBusy("route");
+    setRouteNote("Routing with Freerouting...");
+    try {
+      await save();
+      const res = await trpc.pcb.autoroute.mutate({ project, board: unit, passes: 30 });
+      setBoard(res.board as Board);
+      const r = res.report;
+      setRouteNote(`${r.tracks} tracks, ${r.vias} vias, ${r.open} open, DRC ${r.drcViolations} violations / ${r.drcUnconnected} unconnected, ${r.seconds.toFixed(0)} s${r.notes.length ? " · " + r.notes.join(" · ") : ""}`);
+    } catch (e) {
+      setRouteNote(`Routing failed: ${String(e).slice(0, 160)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function render() {
+    setBusy("render");
+    setRouteNote("Rendering in KiCad...");
+    try {
+      await save();
+      const res = await trpc.pcb.render.mutate({ project, board: unit });
+      setRenders(res.images);
+      setRouteNote(res.missingModels.length ? `Rendered; ${res.missingModels.length} parts have no 3D model` : "Rendered");
+    } catch (e) {
+      setRouteNote(`Render failed: ${String(e).slice(0, 160)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
 
   function toWorld(e: { clientX: number; clientY: number }): Point {
     const r = svgRef.current!.getBoundingClientRect();
@@ -254,6 +290,8 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
         <button className={flip ? "on" : ""} onClick={() => setFlip((f) => !f)}>{flip ? "Viewing from back" : "Viewing from front"}</button>
         <button onClick={() => generate(true)} disabled={!!busy}>Re-sync from schematic</button>
         <button className="primary" onClick={save} disabled={!!busy}>Save board</button>
+        <button onClick={autoroute} disabled={!!busy}>{busy === "route" ? "Routing..." : "Autoroute"}</button>
+        <button onClick={render} disabled={!!busy}>{busy === "render" ? "Rendering..." : "Render"}</button>
         <a className="linkbtn" href={`/artifact/${encodeURIComponent(project)}/${unit ? `boards/${unit}/` : ""}board.kicad_pcb`} download>
           Download .kicad_pcb
         </a>
@@ -264,6 +302,19 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
         </span>
         <span className="status">{board.rules.name}</span>
       </div>
+      {routeNote && <div className="pcbnote">{routeNote}</div>}
+      {renders.length > 0 && (
+        <div className="renders">
+          {renders.map((name) => {
+            const href = `/artifact/${encodeURIComponent(project)}/${unit ? `boards/${unit}/` : ""}${name}?t=${Date.now()}`;
+            return (
+              <a key={name} href={href} target="_blank" rel="noreferrer" title={name}>
+                <img src={href} alt={name} />
+              </a>
+            );
+          })}
+        </div>
+      )}
 
       <svg ref={svgRef} className="pcbcanvas" onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
         <g transform={`translate(${view.x},${view.y}) scale(${view.scale}) ${flip ? `translate(${boardW},0) scale(-1,1)` : ""}`}>

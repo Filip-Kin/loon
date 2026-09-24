@@ -12,6 +12,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -692,6 +693,28 @@ const pcbRouter = router({
     }),
 
   // KiCad's own DRC on the saved board: slower, and the one that counts.
+  // Real routing: Freerouting through KiCad, both in containers. Wide copper
+  // for the power nets comes from net classes written into the project first.
+  autoroute: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional(), passes: z.number().optional() }))
+    .mutation(async ({ input }) => {
+      const unit = input.board ?? "";
+      const board = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
+      await writeNetClasses(input.project, unit, defaultNetClassPlan(board));
+      const report = await routeWithFreerouting(input.project, unit, input.passes ?? 30);
+      const routed = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
+      return { report, board: routed };
+    }),
+
+  // Pictures from KiCad's raytracer: top, bottom, isometric, plus a layer plot.
+  render: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .mutation(async ({ input }) => renderBoard(input.project, input.board ?? "")),
+
+  renders: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .query(({ input }) => renderList(input.project, input.board ?? "")),
+
   kicadDrc: publicProcedure
     .input(z.object({ project: z.string(), board: z.string().optional() }))
     .mutation(({ input }) => runKicadDrc(input.project, input.board ?? "")),

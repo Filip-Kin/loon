@@ -70,8 +70,62 @@ function widthOf(l: SxList): number {
   return numAt(find(l, "width"), 1) || 0.12;
 }
 
+// #region KiCad 5 -> 9
+// easyeda2kicad and older libraries write the KiCad 5 "module" form. KiCad 9
+// refuses a board that embeds it, so every pattern is normalised on load:
+// the node name, tedit, bare properties, (width) on graphics, and the legacy
+// centre/angle arc, which is what actually made KiCad 9 abort.
+function normalizeKicad9(root: SxList): void {
+  if (atom(root.items[0]) === "module") root.items[0] = { kind: "atom", value: "footprint" } as Sx;
+  root.items = root.items.filter((it) => !(it.kind === "list" && atom(it.items[0]) === "tedit"));
+  root.items = root.items.filter((it) => !(it.kind === "list" && atom(it.items[0]) === "property" && !find(it, "at")));
+  const A = (v: string): Sx => ({ kind: "atom", value: v }) as Sx;
+  const L = (...items: Sx[]): SxList => ({ kind: "list", items }) as SxList;
+  for (const it of root.items) {
+    if (it.kind !== "list") continue;
+    const head = atom(it.items[0]) ?? "";
+    if (!/^fp_(line|circle|arc|rect|poly)$/.test(head)) continue;
+    const wi = it.items.findIndex((x) => x.kind === "list" && atom((x as SxList).items[0]) === "width");
+    if (wi >= 0 && !find(it, "stroke")) {
+      const w = (it.items[wi] as SxList).items[1];
+      it.items[wi] = L(A("stroke"), L(A("width"), w), L(A("type"), A("solid")));
+    }
+    if (head === "fp_arc") {
+      const ang = find(it, "angle");
+      const c = find(it, "start");
+      const e = find(it, "end");
+      if (ang && c && e && !find(it, "mid")) {
+        const cx = numAt(c, 1), cy = numAt(c, 2), ex = numAt(e, 1), ey = numAt(e, 2);
+        const t = (numAt(ang, 1) * Math.PI) / 180;
+        const rot = (k: number) => ({ x: cx + (ex - cx) * Math.cos(k) - (ey - cy) * Math.sin(k), y: cy + (ex - cx) * Math.sin(k) + (ey - cy) * Math.cos(k) });
+        const m = rot(t / 2), p2 = rot(t);
+        const pt = (n: string, q: { x: number; y: number }) => L(A(n), A(q.x.toFixed(3)), A(q.y.toFixed(3)));
+        it.items = it.items.filter((x) => !(x.kind === "list" && ["start", "end", "angle"].includes(atom((x as SxList).items[0]) ?? "")));
+        it.items.splice(1, 0, pt("start", { x: ex, y: ey }), pt("mid", m), pt("end", p2));
+      }
+    }
+  }
+}
+
+// The reference designator goes just above the part's outline, where it can
+// still be read with the part fitted. Set on the pattern, so every instance
+// gets it and KiCad rotates it with the part.
+function placeReferenceAbove(root: SxList, minY: number): void {
+  const A = (v: string): Sx => ({ kind: "atom", value: v }) as Sx;
+  const at = { kind: "list", items: [A("at"), A("0"), A((minY - 0.9).toFixed(2))] } as SxList;
+  for (const it of root.items) {
+    if (it.kind !== "list") continue;
+    const head = atom(it.items[0]);
+    const isRef = (head === "fp_text" && atom(it.items[1]) === "reference") || (head === "property" && atom(it.items[1]) === "Reference");
+    if (!isRef) continue;
+    const i = it.items.findIndex((x) => x.kind === "list" && atom((x as SxList).items[0]) === "at");
+    if (i >= 0) it.items[i] = at; else it.items.push(at);
+  }
+}
+
 export function parseFootprint(text: string, libId: string): Footprint {
   const root = parse(text);
+  normalizeKicad9(root);
   const name = atom(root.items[1]) ?? libId.split(":")[1] ?? libId;
   const pads: FpPad[] = [];
   for (const p of findAll(root, "pad")) {
@@ -146,6 +200,7 @@ export function parseFootprint(text: string, libId: string): Footprint {
     }
   }
 
+  placeReferenceAbove(root, miny);
   return {
     libId,
     name,

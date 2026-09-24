@@ -275,3 +275,8 @@ svg.canvas.panning { cursor: grabbing; }
   cursor: pointer;
 }
 .layerrow:hover .soloBtn { opacity: 1; }
+
+/* Autoroute / render feedback under the PCB toolbar */
+.pcbnote { padding: 4px 10px; font-size: 12px; color: var(--muted, #888); border-bottom: 1px solid var(--line); }
+.renders { display: flex; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.renders img { height: 140px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
