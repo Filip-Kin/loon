@@ -438,15 +438,21 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (n.items[1]?.kind === "atom" && n.items[2]?.kind === "atom") netNames.set(Number(n.items[1].value), n.items[2].value);
   }
   const num = (l: any, i: number) => Number(l?.items?.[i]?.value ?? 0);
+  // KiCad 9 writes (net 12 "GND"), KiCad 10 writes (net "GND")
+  const netOf = (l: any): string => {
+    const v = l?.items?.[1]?.value;
+    if (v === undefined) return "";
+    return /^\d+$/.test(String(v)) && l.items.length > 2 ? netNames.get(Number(v)) ?? String(l.items[2]?.value ?? "") : String(v);
+  };
   const tracks: Track[] = [];
   for (const s of findAll(root, "segment")) {
     const st = find(s, "start"), en = find(s, "end"), w = find(s, "width"), ly = find(s, "layer"), nt = find(s, "net");
-    tracks.push({ uuid: crypto.randomUUID(), layer: (ly?.items[1] as any)?.value ?? "F.Cu", width: num(w, 1), start: { x: num(st, 1), y: num(st, 2) }, end: { x: num(en, 1), y: num(en, 2) }, net: netNames.get(num(nt, 1)) ?? "" });
+    tracks.push({ uuid: crypto.randomUUID(), layer: (ly?.items[1] as any)?.value ?? "F.Cu", width: num(w, 1), start: { x: num(st, 1), y: num(st, 2) }, end: { x: num(en, 1), y: num(en, 2) }, net: netOf(nt) });
   }
   const vias: Via[] = [];
   for (const v of findAll(root, "via")) {
     const at = find(v, "at"), sz = find(v, "size"), dr = find(v, "drill"), nt = find(v, "net");
-    vias.push({ uuid: crypto.randomUUID(), at: { x: num(at, 1), y: num(at, 2) }, size: num(sz, 1), drill: num(dr, 1), net: netNames.get(num(nt, 1)) ?? "" });
+    vias.push({ uuid: crypto.randomUUID(), at: { x: num(at, 1), y: num(at, 2) }, size: num(sz, 1), drill: num(dr, 1), net: netOf(nt) });
   }
   const board = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
   board.tracks = tracks;
@@ -456,6 +462,7 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   // left alone rather than dropped: the schematic owns which parts exist.
   let moved = 0;
   const placed = new Map<string, { at: Point; rotation: number; side: "F" | "B" }>();
+  const padNetsByRef = new Map<string, Record<string, string>>();
   for (const f of findAll(root, "footprint")) {
     let ref = "";
     for (const pr of findAll(f, "property")) {
@@ -467,6 +474,14 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (!ref) continue;
     const at = find(f, "at");
     const layer = value(f, "layer") ?? "F.Cu";
+    // pad nets too: KiCad's copy is current after "Update PCB from schematic"
+    const pn: Record<string, string> = {};
+    for (const pad of findAll(f, "pad")) {
+      const n = pad.items[1]?.kind === "atom" ? pad.items[1].value : "";
+      const nt = find(pad, "net");
+      if (n && nt) pn[n] = netOf(nt);
+    }
+    padNetsByRef.set(ref, pn);
     placed.set(ref, {
       at: { x: num(at, 1), y: num(at, 2) },
       rotation: (((at && at.items.length > 3 ? num(at, 3) : 0) % 360) + 360) % 360,
@@ -480,6 +495,8 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     f.at = p.at;
     f.rotation = p.rotation;
     f.side = p.side;
+    const pn = padNetsByRef.get(f.ref);
+    if (pn && Object.keys(pn).length) f.padNets = pn;
   }
 
   // Free silkscreen, which is the one thing on the board with no source in the
