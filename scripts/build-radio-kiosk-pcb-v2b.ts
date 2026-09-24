@@ -21,21 +21,19 @@ type Block = { name: string; at: [x: number, y: number]; rows: string[][] };
 const BLOCKS: Block[] = [
   // Band A, y 16-34: under the laptop-side jacks.
   // Serial USB-C (J12 at the top edge) with its ESD and series resistors.
-  { name: "usb", at: [37, 10], rows: [["U52", "R122", "R123", "C141", "C142", "C143"]] },
+  { name: "usb", at: [40, 10], rows: [["U52", "R122", "R123", "C141", "C142", "C143"]] },
   // Laptop rail: VIN -> C40 C44 -> U4 -> L4 -> C45..C47 -> R96 shunt -> U43 (INA180A2)
   // -> U42 (LMV321 CC loop) -> Q7/U7 (ideal diode) -> J3. Feedback under the IC.
-  { name: "buck15", at: [8, 16], rows: [
+  { name: "buck15", at: [11.5, 16], rows: [
     ["C40", "C44", "U4", "L4", "C45", "C46", "C47"],
     ["R96", "U43", "U42", "R97", "R98", "R99", "R40", "R41", "R92"],
     ["Q7", "U7", "C7", "D40", "C116", "C117", "C118", "C41", "C42", "C43"],
   ] },
-  // MCU with its decoupling on three sides, buttons and the 3.3 V LDO (U30).
-  { name: "mcu", at: [62, 9], rows: [
-    ["C130", "C131", "C132"],
-    ["U40", "C133", "C134"],
-    ["C135", "C136", "SW1", "SW2"],
-    ["U30", "C110", "R103", "R26"],
-    ["R100", "R111", "R112"],
+  // MCU with its decoupling beside it, buttons and the 3.3 V LDO (U30).
+  { name: "mcu", at: [58, 9], rows: [
+    ["U40", "C130", "C131", "C132", "C133", "C134"],
+    ["C135", "C136", "SW1", "SW2", "U30"],
+    ["C110", "R103", "R26", "R100", "R111", "R112"],
   ] },
   // Band B, y 38-72: between the two pin rows. Power in on the right, the
   // battery switch, bulk and fan on the quiet left.
@@ -44,24 +42,24 @@ const BLOCKS: Block[] = [
   // CH224A PD sink beside J1's CC pins.
   { name: "pd", at: [56, 49.3], rows: [["U50", "C140", "R120", "R121", "C111"]] },
   // DC in: J2 -> D2 TVS -> Q2/U2 ideal diode -> VIN, then the VIN sense divider.
-  { name: "in_dc", at: [52, 57.5], rows: [["D2", "Q2", "U2"], ["C2", "R94", "R95"]] },
-  { name: "vin", at: [52, 66.1], rows: [["C90", "C91", "R90", "R91"]] },
-  { name: "ntc", at: [40.5, 67], rows: [["RT1", "R107", "C114"]] },
+  { name: "in_dc", at: [56, 57.5], rows: [["D2", "Q2"], ["U2", "C2", "R94", "R95"]] },
+  { name: "vin", at: [56, 67.5], rows: [["C90@0", "C91@0", "R90", "R91"]] },
   // Pack switch: Q8 (P-FET) with the comparator U10, its gate parts and the
   // 12 R test load R85/R88 under Q11.
-  { name: "backup", at: [8, 38.5], rows: [
+  { name: "backup", at: [11.5, 38.5], rows: [
     ["Q8", "Q11", "U10", "Q9", "Q10", "F1"],
     ["R85", "R88", "R80", "R81", "R82", "R83"],
     ["R84", "R86", "R87", "R89", "C99"],
   ] },
-  { name: "bulk", at: [8, 54], rows: [["C97", "C98"]] },
+  { name: "bulk", at: [11.5, 54.6], rows: [["C97", "C98"]] },
   // Passive 12 V path: eFuse U21 and the port P-FET Q13.
-  { name: "efuse", at: [36, 54], rows: [["U21", "Q13"], ["C62", "C61", "C60"], ["R60", "R61", "R62", "R63"]] },
-  // Fan driver, next to the fan header J8 below.
-  { name: "fan", at: [8, 66.6], rows: [["D32", "Q30", "C113", "R101", "R104", "R105", "R106"]] },
-  // Band C, y 77-120: the radio side. PSE by the radio jack, the 54 V boost
+  { name: "efuse", at: [39.3, 54.6], rows: [["U21", "Q13"], ["C62", "C61", "C60"], ["R60", "R61", "R62", "R63"]] },
+  // Fan driver, next to the fan header J8 below; the NTC beside it.
+  { name: "fan", at: [11.5, 66.2], rows: [["D32", "Q30", "C113", "R101", "R104", "R105", "R106"]] },
+  { name: "ntc", at: [11.5, 96], rows: [["RT1", "R107", "C114"]] },
+  // Band C, y 76-120: the radio side. PSE by the radio jack, the 54 V boost
   // beside it, the 12 V and 5 V bucks below.
-  { name: "port", at: [8, 91.5], rows: [["D22", "C112"]] },
+  { name: "port", at: [11.5, 91.5], rows: [["D22", "C112"]] },
   // PSE: U22 with the port FET Q22, the port diodes and caps; sense and
   // programming resistors under it.
   { name: "pse", at: [22, 76.5], rows: [
@@ -71,46 +69,47 @@ const BLOCKS: Block[] = [
   ] },
   // 54 V boost: compensation and feedback on top, the controller, switch and
   // diode, then the output cap and shunt, the inductor at the bottom.
-  { name: "boost", at: [63, 76.5], rows: [
+  { name: "boost", at: [64, 76.5], rows: [
     ["C20", "C21", "R21", "R22", "R23", "R24"],
-    ["C22", "C23", "C24", "R25"],
+    ["C22", "C23", "C24", "R25", "D21@90"],
     ["U20", "Q20", "D20"],
     ["C25", "R20"],
-    ["L20", "D21"],
+    ["L20"],
   ] },
   // 12 V buck: VIN -> C30 C34 -> U3 -> L3 -> C35..C37 -> Q6/U6 (ideal diode) -> +12V.
-  { name: "buck12", at: [27, 91.5], rows: [
-    ["C30", "C34", "U3", "L3"],
-    ["C35", "C36", "C37", "Q6", "U6", "C6"],
-    ["C31", "C32", "C33", "R30", "R31"],
+  { name: "buck12", at: [28.5, 94.7], rows: [
+    ["C30", "C34", "U3", "L3", "C35", "C36"],
+    ["C37", "Q6", "U6", "C6", "C31", "C32", "C33", "R30", "R31"],
   ] },
   // 5 V buck and the 3.3 V LDO U51.
-  { name: "buck5", at: [26, 108], rows: [
+  { name: "buck5", at: [30, 108.4], rows: [
     ["C50", "C54", "U5", "L5", "C55"],
-    ["C56", "C57", "C51", "C52", "C53", "R50", "R51", "U51"],
+    ["C56@0", "C57@0", "C51", "C52", "C53", "R50", "R51", "U51"],
   ] },
 ];
 
 const CONNECTORS: Connector[] = [
-  { ref: "J9", at: { x: 55, y: 5 }, face: "N", rotation: 90 },   // SWD, pins along the edge
-  { ref: "J11", at: { x: 68, y: 5 }, face: "N", rotation: 90 },  // UART
-  { ref: "J8", at: { x: 12, y: 80 }, face: "W", rotation: 0 },   // fan (internal), left column
-  { ref: "J13", at: { x: 13, y: 87 }, face: "W", rotation: 0 },  // lid LED cable
+  { ref: "J9", at: { x: 59, y: 5 }, face: "N", rotation: 90 },   // SWD, pins along the edge
+  { ref: "J11", at: { x: 72, y: 5 }, face: "N", rotation: 90 },  // UART
+  { ref: "J8", at: { x: 15.5, y: 80 }, face: "W", rotation: 0 }, // fan (internal), left column
+  { ref: "J13", at: { x: 16.5, y: 87 }, face: "W", rotation: 0 }, // lid LED cable
   { ref: "D30", at: { x: 89, y: 52.5 }, face: "E", rotation: 90 }, // power LED at the wall between J1 and J2
-  { ref: "D31", at: { x: 26.5, y: 121 }, face: "S", rotation: 0 }, // radio LED at the wall beside J5
+  { ref: "D31", at: { x: 30.5, y: 121 }, face: "S", rotation: 0 }, // radio LED at the wall beside J5
 ];
+// The RJ45s sit 4 mm in from the left so the Ethernet lanes (x 8-10) pass
+// between the corner hole and the jack's peg.
 const FLUSH: Flush[] = [
-  { ref: "J6", edge: "N", along: 15.7, front: "+y", overhang: 0.8 },   // laptop RJ45
-  { ref: "J3", edge: "N", along: 27.7, front: "+x", overhang: 0 },     // laptop DC out
-  { libMatch: /USB_C_Receptacle_HRO|USB_C_Receptacle_GCT/, edge: "N", along: 42, front: "+y", overhang: 0.8 }, // serial USB-C
-  { ref: "J1", edge: "E", along: 44, front: "+y", overhang: 0.8 },   // USB-C PD in
-  { ref: "J2", edge: "E", along: 61, front: "+x", overhang: 0 },     // DC in
-  { ref: "J5", edge: "S", along: 16, front: "+y", overhang: 0.8 },   // radio RJ45
+  { ref: "J6", edge: "N", along: 19.7, front: "+y", overhang: 0.8 },  // laptop RJ45
+  { ref: "J3", edge: "N", along: 31.7, front: "+x", overhang: 0 },    // laptop DC out
+  { libMatch: /USB_C_Receptacle_HRO|USB_C_Receptacle_GCT/, edge: "N", along: 46, front: "+y", overhang: 0.8 }, // serial USB-C
+  { ref: "J1", edge: "E", along: 44, front: "+y", overhang: 0.8 },    // USB-C PD in
+  { ref: "J2", edge: "E", along: 61, front: "+x", overhang: 0 },      // DC in
+  { ref: "J5", edge: "S", along: 20, front: "+y", overhang: 0.8 },    // radio RJ45
 ];
 const SILK: Silk[] = [
-  ["FRC RADIO KIOSK v2b", 83, 22, 1.4, 90], ["Filip Kin  2026", 85.5, 22, 1.1, 90], ["filipkin.com", 87.7, 22, 1.0, 90],
-  ["LAPTOP", 15.7, 15.4, 0.9], ["15.6V", 30, 15.4, 0.9], ["SERIAL", 42, 9.6, 0.9], ["SWD", 55, 8, 0.9], ["UART", 68, 8, 0.9],
-  ["PD IN", 88.8, 36.5, 0.9, 90], ["DC IN", 88.8, 71, 0.9, 90], ["RADIO", 26, 112, 0.9, 90], ["FAN", 12, 76.4, 0.8], ["LID", 13, 83.4, 0.8],
+  ["FRC RADIO KIOSK v2b", 84.5, 22, 1.4, 90], ["Filip Kin  2026", 86.7, 22, 1.1, 90], ["filipkin.com", 88.6, 22, 1.0, 90],
+  ["LAPTOP", 19.7, 15.4, 0.9], ["15.6V", 31.7, 15.4, 0.9], ["SERIAL", 46, 9.3, 0.9], ["SWD", 59, 8, 0.9], ["UART", 72, 8, 0.9],
+  ["PD IN", 88.8, 36.5, 0.9, 90], ["DC IN", 88.8, 71, 0.9, 90], ["RADIO", 29, 113, 0.9, 90], ["FAN", 15.5, 76.4, 0.8], ["LID", 16.5, 83.4, 0.8],
 ];
 
 // #region build
@@ -128,7 +127,7 @@ const taken: { r: R; what: string }[] = [];
 for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref); if (f) taken.push({ r: rectOf(f, fpOf(f)), what: ref }); }
 for (const h of holes) taken.push({ r: { x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2: h.at.x + 3.5, y2: h.at.y + 3.5 }, what: h.ref });
 for (const q of cellPads) taken.push({ r: { x1: q.x - 2.2, y1: q.y - 2.2, x2: q.x + 2.2, y2: q.y + 2.2 }, what: "cell pin" });
-taken.push({ r: { x1: 0, y1: 16, x2: 7.5, y2: 106 }, what: "ethernet lane" });
+taken.push({ r: { x1: 0, y1: 16, x2: 11, y2: 106 }, what: "ethernet lane" });
 
 for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref)!; const r = rectOf(f, fpOf(f)); console.log(`  ${ref.padEnd(4)} rot ${String(f.rotation).padStart(3)}  x ${r.x1.toFixed(1)}-${r.x2.toFixed(1)}  y ${r.y1.toFixed(1)}-${r.y2.toFixed(1)}`); }
 if (process.env.PLACE_DEBUG) for (const ref of process.env.PLACE_DEBUG.split(",")) { const f = board.footprints.find((x) => x.ref === ref)!; const fp = fpOf(f); console.log(`  ${ref}: courtyard ${JSON.stringify(fp.courtyard)} bbox ${JSON.stringify(fp.bbox)}`); }
@@ -141,7 +140,10 @@ for (const b of BLOCKS) {
       const [ref, r] = tok.split("@");
       const f = board.footprints.find((x) => x.ref === ref);
       if (!f) { console.log(`${b.name}: no part ${ref}`); return null; }
-      f.rotation = r ? +r : 0;
+      // Chip parts stand side by side in a row (pads along the row), the
+      // way passives line up on a board; anything else lies as drawn.
+      const chip = /R_(0603|0805|1206|1210)|C_(0603|0805|1206|1210)|Fuse_1206/.test(f.libId);
+      f.rotation = r ? +r : chip ? 90 : 0;
       return { f, sz: sizeOf(fpOf(f), f.rotation) };
     }).filter((x): x is NonNullable<typeof x> => !!x);
     const rowH = Math.max(...parts.map((q) => q.sz.h));
@@ -170,7 +172,7 @@ for (const b of BLOCKS) {
 const left = board.footprints.filter((f) => !placed.has(f.ref) && !/^H\d+$|^BT\d$/.test(f.ref)).map((f) => f.ref);
 if (left.length) console.log("NOT IN LAYOUT:", left.join(" "));
 
-preRouteEthernet(p);
+preRouteEthernet(p, H);
 addSilk(board, SILK);
 const { rats } = checkBoard(p, W, H);
 await writeBoard(p, project, placeOnly);
