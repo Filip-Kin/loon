@@ -854,7 +854,10 @@ export function buildRadioKiosk(): Schematic {
   // An ideal diode (U12/Q12) sits between the pack and the switch: without it
   // Q8's body diode, and its channel while on, would let the 12 V buck charge
   // the primary cells. It also makes the self-test read the pack, not the rail.
-  idealDiode(12, "PACK_F", "BK_MID", bx + 110, by - 40);
+  // Enabled by BK_EN with the pack switch, not by the pack itself: on the
+  // shelf the LM74700 would draw ~80 uA from the cells. Off, Q12's body diode
+  // still passes the pack with a 0.7 V drop until firmware arms it.
+  idealDiode(12, "PACK_F", "BK_MID", bx + 110, by - 40, "BK_EN");
   // High-side P-FET. Gate held at the pack by R80 (off); Q9 pulls it down (on)
   // when the comparator says the input is gone.
   part("Q8", PMOS_40V.libId, "AOD4185", bx + 150, by - 10);
