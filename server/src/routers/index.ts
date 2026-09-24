@@ -564,8 +564,11 @@ const firmwareRouter = router({
 const pcbRouter = router({
   // Footprints for everything on the sheet, fetched from KiCad's library and
   // cached. Returned to the browser so the canvas can draw real land patterns.
+  // Land patterns for the layout view: everything the schematic names, plus
+  // whatever the board itself carries (parts that arrived through KiCad and a
+  // sync are on the board before the browser's copy of the schematic knows them).
   footprints: publicProcedure
-    .input(z.object({ schem: z.any() }))
+    .input(z.object({ schem: z.any(), libIds: z.array(z.string()).optional() }))
     .mutation(async ({ input }) => {
       const schem = input.schem as Schematic;
       const specs = new Map<string, number>();
@@ -575,6 +578,7 @@ const pcbRouter = router({
         const def = library.get(s.libId)?.def ?? schem.libSymbols[s.libId];
         specs.set(fp, def?.pins.length ?? 2);
       }
+      for (const id of input.libIds ?? []) if (id && !specs.has(id)) specs.set(id, 2);
       return getFootprints([...specs].map(([libId, padCount]) => ({ libId, padCount })));
     }),
 

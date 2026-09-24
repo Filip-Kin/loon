@@ -151,7 +151,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
       const res = await trpc.pcb.load.query({ project, board: unit });
       if (res.board) {
         setBoard(withTextIds(res.board as Board));
-        if (schem) setFps(await trpc.pcb.footprints.mutate({ schem }));
+        if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
         return;
       }
       // No board yet: opening this view is the request for one.
@@ -187,6 +187,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     try {
       const res = await trpc.pcb.syncFromDisk.mutate({ project, board: unit });
       setBoard(withTextIds(res.board as Board));
+      if (schem) setFps(await trpc.pcb.footprints.mutate({ schem, libIds: (res.board as Board).footprints.map((f) => f.libId) }));
       setDirty(false);
       const n = res.note;
       setRouteNote(`From disk: ${n.tracks} tracks, ${n.vias} vias, ${n.moved} moved, ${n.texts} texts`);
@@ -194,7 +195,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     } catch (e: any) {
       flash(String(e?.message ?? e), true);
     }
-  }, [project, unit, rebase]);
+  }, [project, unit, rebase, schem]);
 
   useEffect(() => {
     if (!board) return;
