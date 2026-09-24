@@ -1,7 +1,9 @@
 // Screenshot loon's PCB layout view for one project, the way Filip sees it.
-// Run: bun run scripts/pcbshot.ts <project> <out.png> [x0 y0 x1 y1 in board mm to zoom to]
+// Run: bun run scripts/pcbshot.ts <project> <out.png> [top|bottom|all] [x0 y0 x1 y1 in board mm to zoom to]
 import puppeteer from "puppeteer-core";
-const [project, out, ...box] = process.argv.slice(2);
+const [project, out, ...rest] = process.argv.slice(2);
+const mode = ["top", "bottom", "all"].includes(rest[0]) ? rest.shift()! : "all";
+const box = rest;
 const browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH ?? "/usr/bin/chromium", args: ["--no-sandbox", "--disable-dev-shm-usage"], defaultViewport: { width: 1400, height: 1400, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
 page.on("pageerror", (e) => console.log("page error:", String(e).slice(0, 300)));
@@ -11,6 +13,27 @@ await page.goto("http://127.0.0.1:8790/", { waitUntil: "networkidle2", timeout: 
 await new Promise((r) => setTimeout(r, 3000));
 await page.evaluate(() => { const b = [...document.querySelectorAll(".topbar button")].find((x) => x.textContent?.trim() === "PCB") as HTMLButtonElement | undefined; b?.click(); });
 await new Promise((r) => setTimeout(r, 10000));
+// layer set for the view: tick exactly these in the layers box
+const want: Record<string, string[]> = {
+  top: ["F.Cu", "F.SilkS", "Edge.Cuts", "Drill", "References"],
+  bottom: ["B.Cu", "B.SilkS", "Edge.Cuts", "Drill", "References"],
+  all: ["F.Cu", "B.Cu", "F.SilkS", "Edge.Cuts", "Drill", "References", "Ratsnest"],
+};
+await page.evaluate((names) => {
+  for (const lab of [...document.querySelectorAll("label")]) {
+    const box = lab.querySelector("input[type=checkbox]") as HTMLInputElement | null;
+    const name = lab.textContent?.trim() ?? "";
+    if (!box || !name) continue;
+    const on = names.includes(name);
+    if (box.checked !== on) box.click();
+  }
+}, want[mode]);
+if (mode === "bottom") {
+  await page.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent?.trim() === "Front") as HTMLButtonElement | undefined; b?.click(); });
+}
+// collapse the layers box so it does not cover the board
+await page.evaluate(() => { const b = document.querySelector(".layerpanel button.collapse[aria-expanded=true]") as HTMLButtonElement | null; b?.click(); });
+await new Promise((r) => setTimeout(r, 1500));
 if (box.length === 4) {
   // zoom: wheel on the canvas centred on the box, then screenshot the canvas
   const [x0, y0, x1, y1] = box.map(Number);

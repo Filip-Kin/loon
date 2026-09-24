@@ -464,6 +464,7 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
   const placed = new Map<string, { at: Point; rotation: number; side: "F" | "B" }>();
   const padNetsByRef = new Map<string, Record<string, string>>();
   const libAndValue = new Map<string, { libId: string; value: string }>();
+  const labelsByRef = new Map<string, NonNullable<Board["footprints"][number]["labels"]>>();
   for (const f of findAll(root, "footprint")) {
     let ref = "", val = "";
     for (const pr of findAll(f, "property")) {
@@ -473,6 +474,23 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
       }
     }
     if (ref) libAndValue.set(ref, { libId: f.items[1]?.kind === "atom" ? f.items[1].value : "", value: val });
+    // silk fields exactly as the file places them
+    const labels: NonNullable<Board["footprints"][number]["labels"]> = [];
+    for (const pr of findAll(f, "property")) {
+      const field = pr.items[1]?.kind === "atom" ? pr.items[1].value : "";
+      if (field !== "Reference" && field !== "Value") continue;
+      const layer = value(pr, "layer") ?? "";
+      if (!/SilkS$/.test(layer)) continue;
+      const eff = find(pr, "effects");
+      if (find(pr, "hide") || (eff && find(eff, "hide"))) {
+        const h = find(pr, "hide") ?? (eff ? find(eff, "hide") : undefined);
+        if (!h || h.items.length < 2 || (h.items[1] as any)?.value !== "no") continue;
+      }
+      const a = find(pr, "at");
+      const font = eff ? find(eff, "font") : undefined;
+      labels.push({ field, text: pr.items[2]?.kind === "atom" ? pr.items[2].value : "", at: { x: num(a, 1), y: num(a, 2) }, angle: a && a.items.length > 3 ? num(a, 3) : 0, size: font ? num(find(font, "size"), 2) || 1 : 1, layer });
+    }
+    if (ref) labelsByRef.set(ref, labels);
     if (!ref) for (const t of findAll(f, "fp_text")) {
       if (t.items[1]?.kind === "atom" && t.items[1].value === "reference" && t.items[2]?.kind === "atom") ref = t.items[2].value;
     }
@@ -502,7 +520,7 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     if (known.has(ref)) continue;
     const lv = libAndValue.get(ref);
     if (!lv?.libId) continue;
-    board.footprints.push({ uuid: crypto.randomUUID(), ref, value: lv.value, libId: lv.libId, at: p.at, rotation: p.rotation, side: p.side, padNets: padNetsByRef.get(ref) ?? {} });
+    board.footprints.push({ uuid: crypto.randomUUID(), ref, value: lv.value, libId: lv.libId, at: p.at, rotation: p.rotation, side: p.side, padNets: padNetsByRef.get(ref) ?? {}, labels: labelsByRef.get(ref) });
     added++;
   }
   if (placed.size >= board.footprints.length * 0.9) {
@@ -522,6 +540,8 @@ export async function syncFromKicad(project: string, unit = ""): Promise<{ track
     const lv = libAndValue.get(f.ref);
     if (lv?.libId) f.libId = lv.libId;
     if (lv?.value) f.value = lv.value;
+    const lb = labelsByRef.get(f.ref);
+    if (lb) f.labels = lb;
     const pn = padNetsByRef.get(f.ref);
     if (pn && Object.keys(pn).length) f.padNets = pn;
   }

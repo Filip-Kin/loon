@@ -774,6 +774,24 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
             </text>
           ))}
 
+          {/* silk labels where the board file puts them: the part's frame,
+              absolute angle, kept upright the way KiCad draws them */}
+          {vis("Refs") && board.footprints.flatMap((f) => (f.labels ?? []).filter((l) => vis(l.layer.startsWith("B") ? "B.SilkS" : "F.SilkS")).map((l, i) => {
+            const t = (f.rotation * Math.PI) / 180;
+            const lx = f.side === "B" ? -l.at.x : l.at.x, ly = l.at.y;
+            const x = f.at.x + lx * Math.cos(t) + ly * Math.sin(t);
+            const y = f.at.y - lx * Math.sin(t) + ly * Math.cos(t);
+            let a = ((l.angle % 360) + 360) % 360;
+            if (a > 90 && a <= 270) a -= 180;
+            const selected = sel?.kind === "fp" && sel.id === f.uuid;
+            return (
+              <text key={`${f.uuid}-${l.field}-${i}`} x={0} y={0} transform={`translate(${x},${y}) rotate(${-a})${f.side === "B" ? " scale(-1,1)" : ""}`}
+                fontSize={l.size * 1.25} fill={selected ? "#fff" : LAYER_COLOR["Refs"]} textAnchor="middle" dominantBaseline="central" style={{ fontFamily: "monospace" }}>
+                {l.text}
+              </text>
+            );
+          }))}
+
           {/* footprints */}
           {board.footprints.map((f) => {
             const fp = fps[f.libId];
@@ -825,7 +843,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
                     </g>
                   );
                 })}
-                {vis("Refs") && (
+                {vis("Refs") && !f.labels && (
                   <text x={0} y={-((fp.bbox.max.y - fp.bbox.min.y) / 2 + 0.4)} fontSize={0.9} fill={selected ? "#fff" : LAYER_COLOR["Refs"]} textAnchor="middle">
                     {f.ref}
                   </text>

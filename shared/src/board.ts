@@ -26,6 +26,10 @@ export interface PlacedFootprint {
   padNets: Record<string, string>;
   // Block this part belongs to, so placement can keep a module together.
   blockId?: string;
+  // Silkscreen fields as the board file has them (reference, and a value put
+  // on silk such as "UART"): position in the part's frame, absolute angle,
+  // text height. Absent: the view places the reference itself.
+  labels?: { field: "Reference" | "Value"; text: string; at: Point; angle: number; size: number; layer: string }[];
 }
 
 export interface Track {
