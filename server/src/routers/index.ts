@@ -12,7 +12,7 @@ import { firmwareTargets, generatePinsHeader, generatePlatformIni, generateMainS
 import { startBuild, getBuild, listBuilds } from "../services/build";
 import { getFootprints } from "../services/footprints";
 import { generateBoard, ratsnest, runDrc } from "@loon/shared/pcbgen";
-import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan } from "../services/route-render";
+import { routeWithFreerouting, renderBoard, renderList, writeNetClasses, defaultNetClassPlan, readRouteProgress } from "../services/route-render";
 import { padWorld } from "@loon/shared/pcbgen";
 import { autoroute } from "@loon/shared/autoroute";
 import { planPours, stitchVias } from "@loon/shared/pour";
@@ -705,6 +705,11 @@ const pcbRouter = router({
       const routed = JSON.parse(await storage.readFile(input.project, "board.loon.json", unit)) as Board;
       return { report, board: routed };
     }),
+
+  // Where the current (or last) route run is; polled by the editor's bar.
+  routeProgress: publicProcedure
+    .input(z.object({ project: z.string(), board: z.string().optional() }))
+    .query(({ input }) => readRouteProgress(input.project, input.board ?? "")),
 
   // Pictures from KiCad's raytracer: top, bottom, isometric, plus a layer plot.
   render: publicProcedure

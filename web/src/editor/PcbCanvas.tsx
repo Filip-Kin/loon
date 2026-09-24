@@ -4,6 +4,7 @@ import type { Footprint, FpPad } from "@loon/shared/footprint";
 import type { Board, PlacedFootprint, Track } from "@loon/shared/board";
 import { ratsnest, padWorld, type DrcIssue } from "@loon/shared/pcbgen";
 import { trpc } from "../trpc";
+import type { RouteProgress } from "../../../server/src/services/route-render";
 
 interface Props {
   project: string;
@@ -67,6 +68,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
   const [unrouted, setUnrouted] = useState(0);
   const [renders, setRenders] = useState<string[]>([]);
   const [routeNote, setRouteNote] = useState<string>("");
+  const [progress, setProgress] = useState<RouteProgress | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [tool, setTool] = useState<"move" | "track">("move");
   const [layer, setLayer] = useState("F.Cu");
@@ -125,6 +127,21 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     }
     setBusy(null);
   }
+  // While a route runs, poll the server's progress file. A run started from
+  // the CLI shows up here too, since it writes the same file.
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const p = await trpc.pcb.routeProgress.query({ project, board: unit });
+        if (!stop) setProgress(p);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, busy === "route" || progress?.running ? 3000 : 30000);
+    return () => { stop = true; clearInterval(id); };
+  }, [project, unit, busy, progress?.running]);
+
   // Freerouting through KiCad, in containers on the server. Minutes, not seconds.
   async function autoroute() {
     if (!board) return;
@@ -303,6 +320,7 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
         </span>
         <span className="status">{board.rules.name}</span>
       </div>
+      {progress?.running && <RouteBar p={progress} />}
       {routeNote && <div className="pcbnote">{routeNote}</div>}
       {preview && (
         <div className="lightbox" onClick={() => setPreview(null)}>
@@ -499,3 +517,27 @@ export function PcbCanvas({ project, schem, flash, rev, unit }: Props) {
     </div>
   );
 }
+
+// #region route bar
+const STAGE_LABEL: Record<RouteProgress["stage"], string> = {
+  export: "Export", fanout: "Fanout", route: "Routing", optimize: "Optimizer", import: "Import", drc: "DRC", done: "Done", failed: "Failed",
+};
+function fmtEta(s: number | null): string {
+  if (s === null) return "ETA …";
+  if (s < 60) return `ETA ${s} s`;
+  return `ETA ${Math.round(s / 60)} min`;
+}
+function RouteBar({ p }: { p: RouteProgress }) {
+  const elapsed = Math.round((Date.now() - p.startedAt) / 1000);
+  const pass = p.stage === "route" ? `Pass ${p.pass}/${p.passes}` : p.pass ? `Pass ${p.pass}` : "";
+  return (
+    <div className="routebar" role="progressbar" aria-valuenow={Math.round(p.fraction * 100)} aria-valuemin={0} aria-valuemax={100}>
+      <div className="routebar-fill" style={{ width: `${Math.round(p.fraction * 100)}%` }} />
+      <span className="routebar-text">
+        {STAGE_LABEL[p.stage]}{pass ? ` · ${pass}` : ""}{p.stage === "route" || p.stage === "optimize" || p.stage === "fanout" ? ` · ${p.unrouted} open` : ""}
+        {p.violations ? ` · ${p.violations} violations` : ""} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")} · {fmtEta(p.etaSeconds)}
+      </span>
+    </div>
+  );
+}
+// #endregion

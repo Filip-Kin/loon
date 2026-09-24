@@ -7,7 +7,7 @@
 // per board from KiCad's library, plus the LCSC models easyeda2kicad wrote.
 
 import { join } from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { storage } from "./storage";
 import { parse, findAll, find } from "@loon/shared/sexpr";
 import { readZoneFills } from "@loon/shared/kicad-pcb";
@@ -28,6 +28,118 @@ async function run(args: string[], timeoutMs: number): Promise<{ code: number; o
   clearTimeout(timer);
   return { code, out: out + err };
 }
+// Same as run(), but hands each stdout line to the caller as it arrives.
+async function runStreaming(args: string[], timeoutMs: number, onLine: (l: string) => void): Promise<{ code: number; out: string }> {
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  const timer = setTimeout(() => proc.kill(), timeoutMs);
+  const lines: string[] = [];
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i: number;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const l = buf.slice(0, i); buf = buf.slice(i + 1);
+      lines.push(l); onLine(l);
+    }
+  }
+  if (buf) { lines.push(buf); onLine(buf); }
+  const err = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  clearTimeout(timer);
+  return { code, out: lines.join("\n") + err };
+}
+
+// #region progress
+// Where a route run is, for the editor's progress bar. Written to the
+// project dir so a run started from the CLI shows up in the UI too.
+export interface RouteProgress {
+  running: boolean;
+  stage: "export" | "fanout" | "route" | "optimize" | "import" | "drc" | "done" | "failed";
+  pass: number;          // current pass within the stage
+  passes: number;        // pass budget for the route stage
+  unrouted: number;      // open items after the last pass
+  violations: number;
+  fraction: number;      // 0..1 across the whole run
+  etaSeconds: number | null;
+  startedAt: number;
+  updatedAt: number;
+  note: string;
+}
+const PROGRESS_FILE = "route-progress.json";
+export async function readRouteProgress(project: string, unit = ""): Promise<RouteProgress | null> {
+  const f = join(storage.projectDir(project, unit), PROGRESS_FILE);
+  if (!existsSync(f)) return null;
+  try { return JSON.parse(await Bun.file(f).text()) as RouteProgress; } catch { return null; }
+}
+
+class ProgressTracker {
+  p: RouteProgress;
+  private passTimes: number[] = [];
+  private unroutedHist: number[] = [];
+  private lastWrite = 0;
+  constructor(private file: string, passes: number) {
+    this.p = { running: true, stage: "export", pass: 0, passes, unrouted: 0, violations: 0, fraction: 0, etaSeconds: null, startedAt: Date.now(), updatedAt: Date.now(), note: "" };
+    this.flush(true);
+  }
+  set(patch: Partial<RouteProgress>) { Object.assign(this.p, patch); this.flush(); }
+  // Parse one Freerouting log line. Fanout, routing and optimizer passes each
+  // say how long they took and how much is still open.
+  line(l: string) {
+    let m: RegExpMatchArray | null;
+    if ((m = l.match(/Fanout pass #(\d+) .* completed in ([\d.]+) seconds .* (\d+) not routed/))) {
+      this.set({ stage: "fanout", pass: +m[1], unrouted: +m[3], fraction: Math.min(0.1, 0.02 + +m[1] * 0.01), etaSeconds: this.eta() });
+    } else if ((m = l.match(/Auto-routing stage started .* for (\d+) unrouted items/))) {
+      this.unroutedHist = [+m[1]]; this.passTimes = [];
+      this.set({ stage: "route", pass: 0, unrouted: +m[1], fraction: 0.1, etaSeconds: this.eta() });
+    } else if ((m = l.match(/Auto-routing pass #(\d+) .* completed in ([\d.]+) seconds with score [\d.]+ \((\d+) unrouted and (\d+) violations/))) {
+      this.passTimes.push(+m[2]); this.unroutedHist.push(+m[3]);
+      const byPass = +m[1] / this.p.passes;
+      const start = this.unroutedHist[0] || 1;
+      const byItems = 1 - +m[3] / start;
+      this.set({ stage: "route", pass: +m[1], unrouted: +m[3], violations: +m[4], fraction: 0.1 + 0.75 * Math.max(byPass, byItems), etaSeconds: this.eta() });
+    } else if ((m = l.match(/Optimizer pass #(\d+) .* completed in ([\d.]+) seconds with the score of [\d.]+ \((\d+) unrouted and (\d+) violations/))) {
+      this.set({ stage: "optimize", pass: +m[1], unrouted: +m[3], violations: +m[4], fraction: Math.min(0.95, 0.85 + +m[1] * 0.03), etaSeconds: this.eta() });
+    } else if (/Optimization stage started/.test(l)) {
+      this.set({ stage: "optimize", pass: 0, fraction: 0.85, etaSeconds: this.eta() });
+    }
+  }
+  // Route passes get shorter and clear fewer items as they go; the estimate
+  // takes the mean pass time and the recent clearing rate, and stops at the
+  // pass budget. The optimizer is allowed two passes on top.
+  private eta(): number | null {
+    const st = this.p.stage;
+    const mean = this.passTimes.length ? this.passTimes.reduce((a, b) => a + b, 0) / this.passTimes.length : null;
+    if (st === "fanout") return null;
+    if (st === "route") {
+      if (mean === null) return null;
+      const h = this.unroutedHist;
+      const left = this.p.passes - this.p.pass;
+      let passesLeft = left;
+      if (h.length >= 3) {
+        const recent = h.slice(-3);
+        const rate = (recent[0] - recent[recent.length - 1]) / (recent.length - 1);
+        if (rate > 0) passesLeft = Math.min(left, Math.ceil(this.p.unrouted / rate));
+        else passesLeft = Math.min(left, 3);   // stalls end the stage after 3 flat passes
+      }
+      return Math.round(passesLeft * mean + 2 * mean);
+    }
+    if (st === "optimize") return mean === null ? null : Math.round(Math.max(1, 2 - this.p.pass) * mean);
+    return null;
+  }
+  private flush(force = false) {
+    this.p.updatedAt = Date.now();
+    if (!force && Date.now() - this.lastWrite < 500) return;
+    this.lastWrite = Date.now();
+    try { writeFileSync(this.file, JSON.stringify(this.p)); } catch {}
+  }
+  finish(ok: boolean, note: string) { this.set({ running: false, stage: ok ? "done" : "failed", fraction: 1, etaSeconds: 0, note }); this.flush(true); }
+}
+// #endregion
+
 const kicadPy = (dir: string, script: string, extra: string[] = []) =>
   run([DOCKER, "run", "--rm", "-v", `${dir}:/work`, "-w", "/work", ...extra, KICAD, "python3", "-c", script], 600000);
 
@@ -124,6 +236,11 @@ export async function routeWithFreerouting(project: string, unit = "", opts: Rou
   const dir = storage.projectDir(project, unit);
   const notes: string[] = [];
   const t0 = Date.now();
+  const prog = new ProgressTracker(join(dir, PROGRESS_FILE), passes);
+  const fail = (note: string): RouteReport => {
+    prog.finish(false, note);
+    return { ok: false, seconds: (Date.now() - t0) / 1000, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [...notes, note] };
+  };
 
   if (o.keepTracks && existsSync(join(dir, "board.ses"))) {
     const board = JSON.parse(await storage.readFile(project, "board.loon.json", unit)) as Board;
@@ -150,19 +267,21 @@ b = pcbnew.LoadBoard('/work/board.kicad_pcb')
 ok = pcbnew.ExportSpecctraDSN(b, '/work/board.dsn')
 print('dsn', ok)
 `);
-  if (!/dsn True/.test(dsn.out)) return { ok: false, seconds: 0, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [`DSN export failed: ${dsn.out.trim().split("\n").pop()}`] };
+  if (!/dsn True/.test(dsn.out)) return fail(`DSN export failed: ${dsn.out.trim().split("\n").pop()}`);
 
   // Ground is the pour on both sides; routing it as tracks wastes the router's
   // effort and the board's space. Take it out of the DSN's network section.
   if (!o.routeGnd) await stripNetsFromDsn(join(dir, "board.dsn"), ["GND"]);
   await run(["chmod", "777", dir], 10000);
-  const fr = await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
+  prog.set({ stage: "fanout", fraction: 0.02 });
+  const fr = await runStreaming([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, FREEROUTING,
     "java", "-jar", "/app/freerouting-executable.jar", "--user_data_path=/work/.freerouting", "--gui-enabled=false",
-    "-de", "/work/board.dsn", "-do", "/work/board.ses", "-mp", String(passes), "-mt", "8"], 3600000);
+    "-de", "/work/board.dsn", "-do", "/work/board.ses", "-mp", String(passes), "-mt", "8"], 3600000, (l) => prog.line(l));
   // Freerouting ran as root, so its scratch dir and the SES are root's: clean
   // up and hand them back the same way.
   await run([DOCKER, "run", "--rm", "--user", "root", "-v", `${dir}:/work`, "--entrypoint", "sh", FREEROUTING, "-c", `rm -rf /work/.freerouting; chown ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} /work/board.ses /work/board.dsn 2>/dev/null; true`], 30000);
-  if (!existsSync(join(dir, "board.ses"))) return { ok: false, seconds: (Date.now() - t0) / 1000, tracks: 0, vias: 0, open: 0, drcViolations: 0, drcUnconnected: 0, drcByRule: [], notes: [`Freerouting wrote no session: ${fr.out.split("\n").filter((l) => /ERROR|Exception/.test(l)).slice(-2).join(" | ")}`] };
+  if (!existsSync(join(dir, "board.ses"))) return fail(`Freerouting wrote no session: ${fr.out.split("\n").filter((l) => /ERROR|Exception/.test(l)).slice(-2).join(" | ")}`);
+  prog.set({ stage: "import", fraction: 0.95, etaSeconds: 60 });
   const frInfo = fr.out.split("\n").filter((l) => /INFO/.test(l) && /rout|pass|complete/i.test(l)).slice(-2).map((l) => l.replace(/^.*INFO\s+/, ""));
   notes.push(...frInfo);
 
@@ -181,9 +300,12 @@ print('result %d %d %d' % (len(tracks), len(vias), b.GetConnectivity().GetUnconn
   const m = imp.out.match(/result (\d+) (\d+) (\d+)/);
   const tracks = m ? Number(m[1]) : 0, vias = m ? Number(m[2]) : 0, open = m ? Number(m[3]) : 0;
 
+  prog.set({ stage: "drc", fraction: 0.98, etaSeconds: 30 });
   const drc = await runDrcJson(project, unit);
   await syncFromKicad(project, unit);
-  return { ok: open === 0 && drc.violations === 0, seconds: (Date.now() - t0) / 1000, tracks, vias, open, drcViolations: drc.violations, drcUnconnected: drc.unconnected, drcByRule: drc.byRule, notes };
+  const ok = open === 0 && drc.violations === 0;
+  prog.finish(ok, `${tracks} tracks, ${open} open, ${drc.violations} DRC`);
+  return { ok, seconds: (Date.now() - t0) / 1000, tracks, vias, open, drcViolations: drc.violations, drcUnconnected: drc.unconnected, drcByRule: drc.byRule, notes };
 }
 
 async function runDrcJson(project: string, unit: string): Promise<{ violations: number; unconnected: number; byRule: { rule: string; count: number }[] }> {
