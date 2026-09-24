@@ -38,23 +38,26 @@ const GROUPS: Group[] = [
   // Targets, not positions: the placer takes the nearest free spot. The four
   // cell holders lie across the back (y 21-65), so their pins come through on
   // two rows, y ~24 and y ~62; the front bands are above, between and below.
+  // The left side is the quiet side: the Ethernet pass-through runs from J6
+  // to J5 down a lane at x 24-30, with only the battery switch, bulk caps and
+  // fan driver beside it. Every switcher is on the right half.
   { name: "usb", refs: [/^J10$/], at: { x: 50, y: 14 } },
-  { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 88, y: 13 } },
+  { name: "fan", refs: [/^D32$/, /^Q30$/, /^R10[1456]$/, /^C113$/], at: { x: 13, y: 91 } },
   { name: "mcu", refs: [/^U40$/, /^C13[0-6]$/, /^R11[12]$/, /^SW[12]$/, /^R26$/, /^R100$/, /^U30$/, /^C110$/, /^R103$/], at: { x: 48, y: 35 } },
-  { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 84, y: 38 } },
-  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 70, y: 34 } },
-  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 84, y: 50 } },
-  { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 70, y: 52 } },
-  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 13, y: 42 } },
-  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 33, y: 52 } },
-  { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 13, y: 78 } },
-  { name: "bulk", refs: [/^C9[78]$/], at: { x: 16, y: 97 } },
-  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 34, y: 80 } },
-  { name: "boost", refs: [/^U20$/, /^Q20$/, /^L20$/, /^D2[01]$/, /^R2[0-5]$/, /^C2[0-5]$/], at: { x: 57, y: 80 } },
-  { name: "efuse", refs: [/^U21$/, /^R6[0-3]$/, /^C6[0-2]$/, /^Q13$/], at: { x: 82, y: 82 } },
-  { name: "backup", refs: [/^F1$/, /^Q8$/, /^R8[0-9]$/, /^Q9$/, /^Q1[01]$/, /^U10$/, /^C99$/], at: { x: 46, y: 108 } },
-  { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 72, y: 110 } },
-  { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 30, y: 118 } },
+  { name: "pd", refs: [/^U50$/, /^R12[01]$/, /^C140$/, /^C111$/], at: { x: 88, y: 40 } },
+  { name: "in_usb", refs: [/^D1$/, /^R93$/, /^U41$/, /^C115$/, /^U1$/, /^Q1$/, /^C1$/], at: { x: 72, y: 36 } },
+  { name: "vin", refs: [/^C9[01]$/, /^R9[01]$/], at: { x: 66, y: 49 } },
+  { name: "in_dc", refs: [/^D2$/, /^U2$/, /^Q2$/, /^C2$/, /^R9[45]$/], at: { x: 48, y: 52 } },
+  { name: "backup", refs: [/^F1$/, /^Q8$/, /^R8[0-9]$/, /^Q9$/, /^Q1[01]$/, /^U10$/, /^C99$/], at: { x: 13, y: 40 } },
+  { name: "bulk", refs: [/^C9[78]$/], at: { x: 13, y: 76 } },
+  { name: "port", refs: [/^D22$/, /^C112$/], at: { x: 13, y: 108 } },
+  { name: "efuse", refs: [/^U21$/, /^R6[0-3]$/, /^C6[0-2]$/, /^Q13$/], at: { x: 85, y: 55 } },
+  { name: "buck5", refs: [/^U5$/, /^C5[0-7]$/, /^R5[01]$/, /^L5$/], at: { x: 84, y: 112 } },
+  { name: "boost", refs: [/^U20$/, /^Q20$/, /^L20$/, /^D2[01]$/, /^R2[0-5]$/, /^C2[0-5]$/], at: { x: 46, y: 81 } },
+  { name: "buck15", refs: [/^U4$/, /^C4[0-7]$/, /^R4[01]$/, /^L4$/, /^R92$/, /^R9[6-9]$/, /^U4[23]$/, /^C11[678]$/, /^D40$/, /^U7$/, /^Q7$/, /^C7$/], at: { x: 72, y: 81 } },
+  { name: "buck12", refs: [/^U3$/, /^C3[0-7]$/, /^R3[01]$/, /^L3$/, /^U6$/, /^Q6$/, /^C6$/], at: { x: 40, y: 112 } },
+  { name: "pse", refs: [/^U22$/, /^R7[0-9]$/, /^C7[01]$/, /^D7[01]$/, /^Q22$/], at: { x: 62, y: 111 } },
+  { name: "ntc", refs: [/^RT1$/, /^R107$/, /^C114$/], at: { x: 90, y: 80 } },
   { name: "cells", refs: [/^BT[1-4]$/], at: { x: 52, y: 43 }, side: "B" },
 ];
 
@@ -63,7 +66,7 @@ const GROUPS: Group[] = [
 const CONNECTORS: { ref: string; at: Point; face: "N" | "E" | "S" | "W"; rotation?: number }[] = [
   { ref: "J9", at: { x: 68, y: 5 }, face: "N", rotation: 90 }, // SWD, pins along the edge
   { ref: "J11", at: { x: 82, y: 5 }, face: "N", rotation: 90 }, // UART, pins along the edge
-  { ref: "J8", at: { x: 66, y: 13 }, face: "N", rotation: 90 }, // fan (internal)
+  { ref: "J8", at: { x: 13, y: 100 }, face: "W", rotation: 0 }, // fan (internal), left column
   // Side-emitting LEDs at the wall, beside the ports they describe. Their
   // rotation is a guess until the lens direction is checked in KiCad's 3D view.
   { ref: "D30", at: { x: 98, y: 48 }, face: "E", rotation: 90 }, // power LED between J2 and J1
@@ -208,7 +211,9 @@ const cellPads: Point[] = [];
   const r = s0.w >= s0.h ? 90 : 0; // long axis along Y
   const cx = 52, cy = 43, gap = 2;
   const spots = [0, 1, 2, 3].map((i) => ({ x: cx + (i - 1.5) * (short + gap), y: cy }));
-  cells.forEach((f, i) => { f.side = "B"; placeAtCentre(f, spots[i], r); });
+  // Alternate the orientation so + of one cell sits beside - of the next and
+  // the series links are short. (Which end is + is checked on the real part.)
+  cells.forEach((f, i) => { f.side = "B"; placeAtCentre(f, spots[i], (r + (i % 2 ? 180 : 0)) % 360); });
   for (const f of cells) for (const pad of fpOf(f).pads) if (pad.type === "thru_hole" || pad.type === "np_thru_hole") cellPads.push(padWorld(f, pad.at));
   console.log(`cells: ${long.toFixed(1)} x ${short.toFixed(1)} mm each, 1 x 4 at (${cx}, ${cy}) on B; pads come through at ${cellPads.map((p) => `(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(" ")}`);
 }
@@ -227,9 +232,11 @@ const EDGE = 2;
 for (const ref of connectorRefs) { const f = board.footprints.find((x) => x.ref === ref); if (f) taken.push(rectOf(f, fpOf(f))); }
 for (const h of holes) taken.push({ x1: h.at.x - 3.5, y1: h.at.y - 3.5, x2: h.at.x + 3.5, y2: h.at.y + 3.5 });
 for (const p of cellPads) taken.push({ x1: p.x - 2, y1: p.y - 2, x2: p.x + 2, y2: p.y + 2 });
+// Ethernet pass-through lane, J6 to J5: nothing else goes here.
+taken.push({ x1: 24, y1: 18, x2: 30, y2: 112 });
 const hits = (r: R) => taken.some((t) => r.x1 < t.x2 && r.x2 > t.x1 && r.y1 < t.y2 && r.y2 > t.y1);
 const GAP = 0.6;
-const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 20, bulk: 28, buck15: 22, buck5: 16, ntc: 8, fan: 12, backup: 28, boost: 30, efuse: 20, pse: 24, port: 8 };
+const WIDTH: Record<string, number> = { mcu: 28, usb: 14, in_usb: 18, in_dc: 20, pd: 12, vin: 14, buck12: 18, bulk: 14, buck15: 22, buck5: 16, ntc: 8, fan: 12, backup: 20, boost: 30, efuse: 20, pse: 24, port: 8 };
 for (const g of GROUPS) {
   if (g.name === "cells") continue;
   const members = board.footprints.filter((f) => groupOf.get(f.ref) === g && !connectorRefs.has(f.ref) && !/USB_C_Receptacle/.test(f.libId));
@@ -262,6 +269,11 @@ for (const g of GROUPS) {
     }
   }
   if (!best) { console.log(`NO ROOM for ${g.name} (${bw.toFixed(0)} x ${bh.toFixed(0)})`); best = sc(g.at); }
+  if (process.env.PLACE_DEBUG === g.name) {
+    const t = sc(g.at);
+    const r: R = { x1: t.x - bw / 2 - 0.5, y1: t.y - bh / 2 - 0.5, x2: t.x + bw / 2 + 0.5, y2: t.y + bh / 2 + 0.5 };
+    console.log(`debug ${g.name} wants ${JSON.stringify(r)}; blockers:`, taken.filter((q) => r.x1 < q.x2 && r.x2 > q.x1 && r.y1 < q.y2 && r.y2 > q.y1).map((q) => JSON.stringify(q)).join(" "));
+  }
   for (const f of members) {
     const p = pos.get(f.ref)!;
     const fp = fpOf(f);
@@ -316,6 +328,29 @@ if (project) {
     // "footprint" and has no use for tedit.
     if (r.items?.[0]?.value === "module") r.items[0] = { kind: "atom", value: "footprint" };
     r.items = (r.items ?? []).filter((it: any) => !(it.kind === "list" && it.items?.[0]?.value === "tedit"));
+    r.items = r.items.filter((it: any) => !(it.kind === "list" && it.items?.[0]?.value === "property" && !it.items.some((x: any) => x.kind === "list" && x.items?.[0]?.value === "at")));
+    for (const it of r.items) {
+      if (it.kind !== "list" || !/^fp_(line|circle|arc|rect|poly)$/.test(it.items?.[0]?.value ?? "")) continue;
+      if (it.items[0].value === "fp_arc") {
+        const ai = it.items.findIndex((x: any) => x.kind === "list" && x.items?.[0]?.value === "angle");
+        if (ai >= 0) {
+          const g = (n: string) => it.items.find((x: any) => x.kind === "list" && x.items?.[0]?.value === n);
+          const c = g("start"), e = g("end");
+          const cx = +c.items[1].value, cy = +c.items[2].value, ex = +e.items[1].value, ey = +e.items[2].value;
+          const ang = (+it.items[ai].items[1].value * Math.PI) / 180;
+          const rotp = (t: number) => ({ x: cx + (ex - cx) * Math.cos(t) - (ey - cy) * Math.sin(t), y: cy + (ex - cx) * Math.sin(t) + (ey - cy) * Math.cos(t) });
+          const m = rotp(ang / 2), p2 = rotp(ang);
+          const pt = (n: string, q: { x: number; y: number }) => ({ kind: "list", items: [{ kind: "atom", value: n }, { kind: "atom", value: q.x.toFixed(3) }, { kind: "atom", value: q.y.toFixed(3) }] });
+          it.items = it.items.filter((x: any) => !(x.kind === "list" && ["start", "end", "angle"].includes(x.items?.[0]?.value)));
+          it.items.splice(1, 0, pt("start", { x: ex, y: ey }), pt("mid", m), pt("end", p2));
+        }
+      }
+      const wi = it.items.findIndex((x: any) => x.kind === "list" && x.items?.[0]?.value === "width");
+      if (wi >= 0) {
+        const w = it.items[wi].items[1];
+        it.items[wi] = { kind: "list", items: [{ kind: "atom", value: "stroke" }, { kind: "list", items: [{ kind: "atom", value: "width" }, w] }, { kind: "list", items: [{ kind: "atom", value: "type" }, { kind: "atom", value: "solid" }] }] };
+      }
+    }
     const yAbove = +(fp.bbox.min.y - 0.9).toFixed(2);
     const atNode = { kind: "list", items: [{ kind: "atom", value: "at" }, { kind: "atom", value: "0" }, { kind: "atom", value: String(yAbove) }] };
     for (const it of r.items ?? []) {
