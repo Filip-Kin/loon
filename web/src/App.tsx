@@ -37,6 +37,7 @@ export function App() {
   // A project can hold more than one board: "" is the main board at its root.
   const [boards, setBoards] = useState<string[]>([""]);
   const [boardName, setBoardName] = useState<string>("");
+  const importRef = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const [placingLibId, setPlacingLibId] = useState<string | null>(null);
@@ -160,6 +161,25 @@ export function App() {
     setProjectName(name);
     setSelection(null);
     setProjects(await trpc.project.list.query());
+  }
+
+  // The project as a KiCad zip, and the way back in.
+  function exportZip() {
+    window.location.assign(`/project/export?name=${encodeURIComponent(projectName)}&board=${encodeURIComponent(boardName)}`);
+  }
+  async function importZip(file: File) {
+    const stem = file.name.replace(/\.zip$/i, "");
+    const name = prompt("Project name", stem);
+    if (!name) return;
+    const safe = name.replace(/[^A-Za-z0-9._-]/g, "_");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/project/import?name=${encodeURIComponent(safe)}`, { method: "POST", body: fd });
+    if (!res.ok) { flash(`Import failed: ${await res.text()}`, true); return; }
+    const r = (await res.json()) as { note: string };
+    setProjects(await trpc.project.list.query());
+    await openProject(safe);
+    flash(`Imported ${safe}: ${r.note}`);
   }
 
   async function openProject(name: string, board = "") {
@@ -417,6 +437,9 @@ export function App() {
           {!projects.find((p) => p.name === projectName) && <option value={projectName}>{projectName}</option>}
         </select>
         <button onClick={() => { const n = prompt("New project name", "untitled"); if (n) newProject(n); }}>New</button>
+        <button onClick={exportZip} title="KiCad project zip">Export</button>
+        <button onClick={() => importRef.current?.click()} title="KiCad project zip">Import</button>
+        <input ref={importRef} type="file" accept=".zip,application/zip" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) importZip(f).catch((err) => flash(String(err?.message ?? err), true)); }} />
         <select
           className="boardpick"
           value={boardName}

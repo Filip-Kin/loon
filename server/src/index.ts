@@ -3,6 +3,7 @@ import { appRouter } from "./routers";
 import { storage } from "./services/storage";
 import { LOON_CONTRACT_VERSION, type LoonManifest } from "@loon/shared/contract";
 import { probeHub, type ProbeSocketData } from "./services/probe-hub";
+import { exportProjectZip, importProjectZip } from "./services/archive";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 
@@ -66,6 +67,39 @@ const server = Bun.serve<ProbeSocketData, {}>({
       });
       cors(res.headers);
       return res;
+    }
+
+    // The project as a KiCad project zip, and the way back in. Raw bytes both
+    // ways; a zip through tRPC would be base64.
+    if (url.pathname === "/project/export") {
+      const name = url.searchParams.get("name");
+      if (!name) return new Response("name required", { status: 400, headers: cors() });
+      try {
+        const z = await exportProjectZip(name, url.searchParams.get("board") ?? "");
+        return new Response(z.bytes, {
+          headers: cors(new Headers({ "content-type": "application/zip", "content-disposition": `attachment; filename="${z.name}"`, "cache-control": "no-store" })),
+        });
+      } catch (e) {
+        return new Response(String((e as Error).message ?? e), { status: 500, headers: cors() });
+      }
+    }
+    if (url.pathname === "/project/import" && req.method === "POST") {
+      const name = url.searchParams.get("name");
+      if (!name) return new Response("name required", { status: 400, headers: cors() });
+      try {
+        let bytes: Uint8Array;
+        if ((req.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {
+          const file = (await req.formData()).get("file");
+          if (!(file instanceof File)) return new Response("file field required", { status: 400, headers: cors() });
+          bytes = new Uint8Array(await file.arrayBuffer());
+        } else {
+          bytes = new Uint8Array(await req.arrayBuffer());
+        }
+        const r = await importProjectZip(name, url.searchParams.get("board") ?? "", bytes);
+        return new Response(JSON.stringify(r), { headers: cors(new Headers({ "content-type": "application/json" })) });
+      } catch (e) {
+        return new Response(String((e as Error).message ?? e), { status: 400, headers: cors() });
+      }
     }
 
     // Firmware images for browser flashing. Raw bytes, because base64 through

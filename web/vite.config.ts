@@ -22,6 +22,7 @@ export default defineConfig({
       // Renders, fab output and firmware images; the built app is served by the
       // API itself, so the dev server has to forward them to match.
       "/artifact": { target: API, changeOrigin: true },
+      "/project": { target: API, changeOrigin: true },
       "/.well-known/loon": { target: API, changeOrigin: true },
     },
   },
