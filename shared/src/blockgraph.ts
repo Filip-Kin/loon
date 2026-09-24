@@ -1,4 +1,10 @@
-// #region Block graph (derived view)
+// #region Block graph (module instances)
+// Note: this is the module-level view - one node per module instantiation, at
+// the position of its parts. The Blocks view in the editor draws segments.ts
+// instead, which groups the whole sheet by function and lays it out by signal
+// flow. This one stays because the block-level ops (move_block, delete_block,
+// set_block_params) address module instances, and blocktest.ts checks them.
+
 // The block view is not a second document. It is the schematic, grouped: a
 // block is the set of symbols one module instantiation owns, its ports are the
 // nets that leave that set, and a link is a net shared by two blocks. Position

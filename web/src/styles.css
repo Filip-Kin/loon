@@ -116,6 +116,25 @@ svg.canvas.panning { cursor: grabbing; }
 .blockwrap { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .blockbar { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .blockcanvas { flex: 1; width: 100%; min-height: 0; background: #0f1014; cursor: grab; }
+.blockbar .spacer { flex: 1; }
+.kindkey { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-faint); }
+.kindkey span { display: flex; align-items: center; gap: 4px; }
+.kindkey i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* What one block is made of, beside the diagram rather than crammed into it. */
+.blockdetail {
+  position: absolute; top: 52px; right: 12px; width: 250px; max-height: calc(100% - 80px);
+  overflow: auto; z-index: 6;
+  background: rgba(16, 18, 22, 0.96); border: 1px solid #2a2f39; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.blockdetail .layerhead { cursor: default; }
+.blockdetail .row { display: flex; justify-content: space-between; gap: 10px; color: var(--text-dim); }
+.blockdetail .row b { color: var(--text); font-weight: 500; text-align: right; }
+.bd-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin-top: 4px; }
+.bd-nets { display: flex; flex-wrap: wrap; gap: 4px; }
+.bd-nets span { font-family: ui-monospace, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 3px; background: #22262f; color: #9fd0ff; }
+.bd-nets.refs span { color: var(--text-dim); }
 .modulepick { position: absolute; top: 42px; left: 10px; z-index: 5; width: 330px; max-height: 70%; overflow: auto; background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .mod-row { padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .mod-row:hover { background: var(--panel-2); }

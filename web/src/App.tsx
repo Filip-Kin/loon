@@ -5,7 +5,6 @@ import { BlockCanvas } from "./editor/BlockCanvas";
 import { CodeView } from "./editor/CodeView";
 import { PcbCanvas } from "./editor/PcbCanvas";
 import { SimView } from "./editor/SimView";
-import type { GraphBlock } from "@loon/shared/blockgraph";
 import { PartsPanel } from "./panels/PartsPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { AiPanel, type ChatMsg } from "./panels/AiPanel";
@@ -459,14 +458,22 @@ export function App() {
               selection={blockSel}
               onSelect={setBlockSel}
               onOps={(ops) => applyLocal(ops)}
-              onDrillIn={(b: GraphBlock) => {
-                // Drill in: jump to the schematic centred on the block.
+              onDrillIn={(memberUuids: string[]) => {
+                // Drill in: jump to the schematic, framed on the block's parts.
                 setView("schematic");
-                const cx = (b.box.min.x + b.box.max.x) / 2;
-                const cy = (b.box.min.y + b.box.max.y) / 2;
-                const scale = 4;
-                setViewport({ scale, x: window.innerWidth / 2 - cx * scale, y: window.innerHeight / 2 - cy * scale });
-                setSelection(b.memberUuids[0] ?? null);
+                const parts = schem.symbols.filter((s) => memberUuids.includes(s.uuid));
+                if (parts.length === 0) return;
+                const xs = parts.map((p) => p.at.x), ys = parts.map((p) => p.at.y);
+                const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+                const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+                const el = document.querySelector(".canvas-wrap");
+                const w = el?.clientWidth ?? window.innerWidth;
+                const h = el?.clientHeight ?? window.innerHeight;
+                const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 20);
+                const scale = clampScale(Math.min(8, Math.min(w, h) / (span + 40)));
+                fittedFor.current = `${projectName}/${boardName}/${schem.uuid}`;
+                setViewport({ scale, x: w / 2 - cx * scale, y: h / 2 - cy * scale });
+                setSelection(memberUuids[0] ?? null);
               }}
             />
           )}

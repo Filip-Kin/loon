@@ -15,7 +15,7 @@ import { moduleSummaries } from "@loon/shared/modules";
 import { pinBudget, formatBudget } from "@loon/shared/pinbudget";
 import { buildNetlist, formatNetlist } from "@loon/shared/netlist";
 import { runErc, formatErc } from "@loon/shared/erc";
-import { buildBlockGraph } from "@loon/shared/blockgraph";
+import { buildSegmentGraph } from "@loon/shared/segments";
 import { firmwareTargets } from "@loon/shared/firmware";
 import { buildBom, formatBom } from "@loon/shared/bom";
 import { library } from "./library";
@@ -76,14 +76,26 @@ function defResolver(libId: string) {
   return library.get(libId)?.def;
 }
 
+// The board as functional segments, which is the same view the user is looking
+// at in Blocks. A list of every part as its own node was the old shape and it
+// told the model nothing it could not read off the netlist.
 function blockContext(schem: Schematic): string {
-  const g = buildBlockGraph(schem, defResolver);
-  if (g.blocks.length === 0) return "(no module blocks yet)";
-  const lines = g.blocks.map(
-    (b) => `- ${b.moduleId} [blockId ${b.id}] ${b.partCount} parts, params ${JSON.stringify(b.params)}, ports: ${b.ports.map((p) => p.net).join(", ")}`,
-  );
-  if (g.looseRefs.length) lines.push(`- loose parts outside any block: ${g.looseRefs.join(", ")}`);
-  return lines.join("\n");
+  const g = buildSegmentGraph(schem, defResolver);
+  if (g.segments.length === 0) return "(nothing on the sheet yet)";
+  const declared = new Set(schem.symbols.map((x) => x.properties.LoonBlock).filter(Boolean) as string[]);
+  const lines = g.segments
+    .slice()
+    .sort((a, b) => a.col - b.col || a.row - b.row)
+    .map((b) => {
+      const id = declared.has(b.id) ? ` [blockId ${b.id}]` : "";
+      return `- ${b.name} (${b.kind})${id} ${b.partCount} parts: ${b.refs.slice(0, 12).join(" ")}${b.refs.length > 12 ? " …" : ""}` +
+        `\n    rails: ${b.rails.join(" ") || "none"}; signals out: ${b.ports.slice(0, 10).map((p) => p.net).join(" ") || "none"}`;
+    });
+  const links = g.links.slice(0, 20).map((l) => {
+    const n = (id: string) => g.segments.find((s) => s.id === id)?.name ?? id;
+    return `- ${n(l.from)} <-> ${n(l.to)}: ${l.nets.slice(0, 6).join(" ")}`;
+  });
+  return [...lines, "LINKS:", ...links].join("\n");
 }
 
 function netlistContext(schem: Schematic): string {
